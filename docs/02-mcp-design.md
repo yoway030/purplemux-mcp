@@ -100,9 +100,9 @@ test/             # unit (config/http/errors/newline) + live e2e (Stage 5)
 
 ```bash
 # Claude Code
-claude mcp add purplemux -- node ~/workspace/purplemux-mcp/dist/index.js
+claude mcp add purplemux -- node /ABS/PATH/purplemux-mcp/dist/index.js
 # Codex
-codex  mcp add purplemux -- node ~/workspace/purplemux-mcp/dist/index.js
+codex  mcp add purplemux -- node /ABS/PATH/purplemux-mcp/dist/index.js
 ```
 PORT/TOKEN are auto-read from `~/.purplemux/{port,cli-token}`, so no `-e` needed on this host;
 `-e PMUX_PORT=… -e PMUX_TOKEN=…` supported for overrides. Config shapes:

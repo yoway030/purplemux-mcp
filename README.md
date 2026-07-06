@@ -1,5 +1,7 @@
 # purplemux-mcp
 
+*한국어 · [English](README.en.md)*
+
 **Claude Code / Codex**에서 로컬 [purplemux](https://github.com/subicura/purplemux)(subicura의 tmux + LLM 워크스페이스 매니저)를 제어하는 MCP 서버다. 워크스페이스·탭·터미널·(Electron)브라우저를 **16개 툴**로 다룬다.
 
 purplemux CLI는 localhost HTTP API를 감싼 얇은 래퍼일 뿐이라, 이 서버는 그 API를 MCP 툴로 그대로 노출한다(CLI로 셸아웃하지 않고 HTTP를 직접 호출). 그래서 에이전트가 터미널을 오케스트레이션하고, 나아가 **Claude·GPT 계열을 넘나드는 크로스 LLM 서브에이전트(다른 AI-CLI 세션)까지 직접 운전**할 수 있다.
