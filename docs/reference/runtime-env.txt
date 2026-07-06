@@ -1,0 +1,2 @@
+PMUX_PORT=16500
+install_path=~/.npm-global/lib/node_modules/purplemux

@@ -1,0 +1,26 @@
+purplemux CLI
+
+Usage: purplemux <command> [args...]
+
+Commands:
+  workspaces                               List workspaces
+  tab list [-w WS]                         List tabs (optionally scoped to workspace)
+  tab create -w WS [-n NAME] [-t TYPE]     Create a tab in workspace (type: terminal | claude-code | codex-cli | agent-sessions | web-browser | diff)
+  tab send -w WS TAB_ID CONTENT...         Send input to a tab
+  tab status -w WS TAB_ID                  Tab status
+  tab result -w WS TAB_ID                  Capture tab pane content
+  tab close -w WS TAB_ID                   Close a tab
+  tab browser url -w WS TAB_ID             Current URL + title of a web-browser tab
+  tab browser screenshot -w WS TAB_ID      Capture tab screenshot (PNG). Use -o FILE to save, --full for full page
+                          [-o FILE] [--full]
+  tab browser console -w WS TAB_ID         Read recent console entries (ring buffer, 500 entries)
+                          [--since MS] [--level LEVEL]
+  tab browser network -w WS TAB_ID         Read recent network entries, or with --request ID to fetch body
+                          [--since MS] [--method M] [--url SUBSTR] [--status CODE] [--request ID]
+  tab browser eval -w WS TAB_ID EXPR       Evaluate JS expression inside the tab; returns serialized value
+  api-guide                                Print full HTTP API reference
+  help                                     Show this usage
+
+Environment:
+  PMUX_PORT       Server port (required)
+  PMUX_TOKEN      CLI token (required)
