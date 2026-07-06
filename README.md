@@ -2,27 +2,27 @@
 
 **Claude Code / Codex**에서 로컬 [purplemux](https://github.com/subicura/purplemux)(subicura의 tmux + LLM 워크스페이스 매니저)를 제어하는 MCP 서버다. 워크스페이스·탭·터미널·(Electron)브라우저를 **16개 툴**로 다룬다.
 
-purplemux CLI는 localhost HTTP API를 감싼 얇은 래퍼일 뿐이라, 이 서버는 그 API를 MCP 툴로 그대로 노출한다(CLI로 셸아웃하지 않고 HTTP를 직접 호출). 그래서 에이전트가 터미널을 오케스트레이션하고, 나아가 **다른 AI-CLI 세션까지 직접 운전**할 수 있다.
+purplemux CLI는 localhost HTTP API를 감싼 얇은 래퍼일 뿐이라, 이 서버는 그 API를 MCP 툴로 그대로 노출한다(CLI로 셸아웃하지 않고 HTTP를 직접 호출). 그래서 에이전트가 터미널을 오케스트레이션하고, 나아가 **Claude·GPT 계열을 넘나드는 크로스 LLM 서브에이전트(다른 AI-CLI 세션)까지 직접 운전**할 수 있다.
 
 Node ≥ 20 + 같은 호스트에 purplemux 실행이 필요하다.
 
 ---
 
-## 왜 만들었나 — 구독형 CLI를 서브에이전트로
+## 왜 만들었나 — 크로스 LLM · 구독형 CLI를 서브에이전트로
 
-이 프로젝트의 진짜 목적은 **tmux(purplemux) 위에서 돌아가는 구독형 CLI(`claude-code`, `codex-cli`)를 서브에이전트로 부려먹는 것**이다.
+이 프로젝트의 진짜 목적은 **tmux(purplemux) 위에서 돌아가는 구독형 CLI(`claude-code`, `codex-cli`)를, 서로 다른 LLM을 넘나드는(크로스 LLM) 서브에이전트로 부려먹는 것**이다.
 
-- 서브에이전트를 API로 붙이면 **토큰 종량 과금**이 붙는다. 반면 Claude Code(Claude 구독)·Codex CLI(ChatGPT/Codex 구독)는 **정액 구독**으로 돌아가는 대화형 세션이다.
-- purplemux는 이 구독형 CLI들을 각각 tmux 페인(탭)으로 띄워 준다. 문제는 "그 탭을 프로그래매틱하게 생성·조작·회수"할 방법이었고, purplemux는 그걸 위한 로컬 HTTP API를 갖고 있다.
-- **이 MCP가 그 다리**다. 오케스트레이터(예: 지금 이 Claude Code)가 →
+- **크로스 LLM 오케스트레이션.** 하나의 오케스트레이터가 **Claude 계열(claude-code)과 GPT 계열(codex-cli)을 동시에** 서브에이전트로 띄워 쓸 수 있다. 같은 문제를 서로 다른 모델에 던져 **교차 검증·합의(consensus)**를 시키거나, 강점이 다른 모델에 작업을 **라우팅**하는 식으로 — 한 모델 계열에 갇히지 않는다.
+- **구독 정액 활용.** 서브에이전트를 API로 붙이면 **토큰 종량 과금**이 붙지만, Claude Code(Claude 구독)·Codex CLI(ChatGPT/Codex 구독)는 **정액 구독**으로 돌아가는 대화형 세션이다. 이 세션들을 워커로 재활용한다.
+- **다리 역할.** purplemux는 이 구독형 CLI들을 각각 tmux 페인(탭)으로 띄워 주고, 그걸 제어할 로컬 HTTP API를 갖고 있다. **이 MCP가 그 API를 열어주는 다리**다. 오케스트레이터(예: 지금 이 Claude Code)가 →
   1. `pmux_create_tab`으로 `claude-code` / `codex-cli` 타입 탭을 띄우고
   2. `pmux_send_input`으로 작업 프롬프트를 넣고(서버가 Enter까지 자동 제출)
   3. `pmux_tab_status` / `pmux_capture_pane`로 진행·결과를 회수하고
   4. `pmux_close_tab`으로 정리한다.
 
-즉 **구독 정액으로 돌아가는 CLI 세션을 "호출 가능한 워커 에이전트"로 바꿔** 팬아웃(fan-out) 오케스트레이션을 하는 게 핵심 시나리오다. 여러 탭에 작업을 나눠 병렬로 돌리고, 상태를 폴링하고, 결과를 합치는 흐름 전체를 자연어 지시로 굴릴 수 있다.
+즉 **여러 LLM의 구독 CLI 세션을 "호출 가능한 워커 에이전트"로 바꿔** 팬아웃(fan-out) 오케스트레이션을 하는 게 핵심 시나리오다. 여러 탭에 작업을 나눠 병렬로 돌리고, 상태를 폴링하고, 서로 다른 모델의 결과를 합치는 흐름 전체를 자연어 지시로 굴릴 수 있다.
 
-> 참고: 이 저장소 자체도 그 정신으로 만들어졌다 — 추출→설계→작업→리뷰→테스트 5단계를 각각 **3개 서브에이전트(Claude Sonnet / Claude Opus / Codex gpt-5.5-high)의 합의**로 진행했다.
+> 참고: 이 저장소 자체도 그 정신으로 만들어졌다 — 추출→설계→작업→리뷰→테스트 5단계를 각각 **크로스 LLM 3개 서브에이전트(Claude Sonnet / Claude Opus / Codex gpt-5.5-high)의 합의**로 진행했다. 서로 다른 모델이 교차 검증한 덕에 실제로 한쪽만으론 놓쳤을 것들(예: `send` 자동 제출 동작, 포트 인젝션 토큰 유출)을 잡아냈다.
 
 ---
 
