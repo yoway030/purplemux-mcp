@@ -4,3 +4,4 @@ dist/
 *.tsbuildinfo
 .claude/settings.local.json
 .DS_Store
+.pmux-agents/

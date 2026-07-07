@@ -151,3 +151,144 @@ export const browserEvalShape = {
 export const apiGuideShape = {} as const;
 
 export const connectionInfoShape = {} as const;
+
+const providerEnum = z.enum(["codex", "claude"]);
+const effortEnum = z.enum(["low", "medium", "high", "xhigh"]);
+const sandboxEnum = z.enum(["read-only", "workspace-write"]);
+const permissionModeEnum = z.enum([
+  "plan",
+  "manual",
+  "acceptEdits",
+  "dontAsk",
+  "auto",
+]);
+
+const agentId = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/)
+  .describe("Caller-owned agent id: ^[a-z0-9][a-z0-9_-]{0,31}$.");
+const requestId = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/)
+  .optional()
+  .describe("Optional caller-owned request id using the same format as agentId.");
+const turn = z
+  .number()
+  .int()
+  .min(0)
+  .describe("Caller-owned turn number. turn=0 is recommended for bootstrap.");
+const userPattern = (field: string) =>
+  z
+    .string()
+    .max(200)
+    .optional()
+    .describe(`${field} regex override. Max 200 chars; compile errors become ToolError.`);
+
+export const agentStartShape = {
+  workspaceId,
+  name: z.string().optional().describe("Optional display name for the terminal tab."),
+  provider: providerEnum.describe("Agent CLI provider: codex or claude."),
+  model: z
+    .string()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe(
+      "Optional model id. Must satisfy ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$; invalid values return ToolError.",
+    ),
+  effort: effortEnum
+    .optional()
+    .describe("Optional reasoning effort. For claude this is returned as bootstrapHint, not a CLI flag."),
+  sandbox: sandboxEnum
+    .optional()
+    .describe("Codex-only sandbox. Defaults to read-only in the command profile."),
+  permissionMode: permissionModeEnum
+    .optional()
+    .describe("Claude-only permission mode; bypassPermissions is intentionally excluded."),
+  shellTimeoutMs: z
+    .number()
+    .int()
+    .min(1)
+    .max(30000)
+    .optional()
+    .describe("How long pmux_agent_start waits for the new terminal shell prompt before returning not_shell_ready. Defaults to 5000; max 30000."),
+} as const;
+
+export const agentWaitReadyShape = {
+  workspaceId,
+  tabId,
+  provider: providerEnum,
+  timeoutMs: z
+    .number()
+    .int()
+    .min(1)
+    .max(180000)
+    .optional()
+    .describe("Total polling timeout in ms. Defaults to 30000; max 180000."),
+  pollMs: z
+    .number()
+    .int()
+    .min(500)
+    .optional()
+    .describe("Polling interval in ms. Defaults to 1500; minimum 500."),
+  readyPattern: userPattern("readyPattern"),
+  errorPattern: userPattern("errorPattern"),
+  busyPattern: userPattern("busyPattern"),
+} as const;
+
+export const agentSendShape = {
+  workspaceId,
+  tabId,
+  provider: providerEnum.describe("Provider used for readiness/busy checks: codex or claude."),
+  agentId,
+  turn,
+  prompt: z.string().min(1).describe("Prompt body to send before the standard PMUX sentinel footer."),
+  requestId,
+  fileOutput: z
+    .boolean()
+    .optional()
+    .describe("Defaults to true. true writes response content to the v2.1 report file; false uses pane BEGIN/END fallback."),
+  maxResponseLines: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe("Line limit inserted into the sentinel footer. Defaults to 40."),
+  expectPrevTurnEnd: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("If set, the pane must contain the previous turn's END marker before sending."),
+  skipReadyCheck: z
+    .boolean()
+    .optional()
+    .describe("Skip prompt-readiness gating, but still reject launch/error patterns."),
+  readyPattern: userPattern("readyPattern"),
+  errorPattern: userPattern("errorPattern"),
+  busyPattern: userPattern("busyPattern"),
+} as const;
+
+export const agentCaptureShape = {
+  workspaceId,
+  tabId,
+  agentId,
+  turn,
+  requestId,
+} as const;
+
+export const agentStatusShape = {
+  workspaceId,
+  tabId,
+  provider: providerEnum,
+  agentId: agentId
+    .optional()
+    .describe("Optional agent id. When omitted, status returns readiness only."),
+  turn: turn
+    .optional()
+    .describe("Optional turn number. Used with agentId for DONE/report-file status."),
+  requestId,
+  readyPattern: userPattern("readyPattern"),
+  errorPattern: userPattern("errorPattern"),
+  busyPattern: userPattern("busyPattern"),
+} as const;

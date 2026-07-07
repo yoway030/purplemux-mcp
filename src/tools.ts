@@ -8,6 +8,7 @@ import { callApi, type RawResult } from "./http.js";
 import { ToolError } from "./errors.js";
 import { resolvePort, resolveToken, isValidPort } from "./config.js";
 import * as S from "./schemas.js";
+import { registerAgentTools } from "./agents.js";
 
 /** Encode any JSON-serializable value as a single text content block. */
 function jsonResult(value: unknown): CallToolResult {
@@ -401,4 +402,5 @@ export function registerAll(server: McpServer): void {
       });
     }),
   );
+  registerAgentTools(server);
 }

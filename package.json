@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "smoke": "node test/smoke.mjs",
-    "e2e": "node test/e2e.mjs"
+    "e2e": "node test/e2e.mjs",
+    "unit": "node test/unit.mjs"
   },
   "engines": {
     "node": ">=20"
