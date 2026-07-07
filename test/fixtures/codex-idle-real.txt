@@ -1,0 +1,49 @@
+    58 +- `wait_ready`: `agent_blocked`는 terminal state로 반환.
+    59 +- `send`: `agent_blocked`면 `sent:false, reason:"blocked"` 또는 `"agent_blocked
+        "`로 반환. `not_ready`와 구분해야 한다.
+    60 +- `status`: `readiness.state`, `signalSource`, `rawCliState`, `command`를 포함.
+    61 +- `turn`: blocked 상태에서 send를 시도하지 않고 `send_failed` 또는 `blocked` 계
+        열로 구조화 반환.
+    62 +
+    63 +## R2/R3/R4/R5 간단 판정
+    64 +
+    65 +R2는 approve. req 기반 단축 마커는 좁은 pane 문제의 1차 해법이고, wrap tolerant
+         parser는 보조 해법으로 두는 순서가 맞다. 단축 마커는 기존 agent/turn 형식과 호
+        환 파서를 유지해야 한다.
+    66 +
+    67 +R3는 approve. R0 판정 사다리를 내부에서 공통 사용하고, timeout 시 marker를 돌려
+        줘 `pmux_agent_capture`로 재개 가능하게 한 점이 중요하다.
+    68 +
+    69 +R4/R5는 approve. 특히 `pmux_create_tab`의 `codex-cli` panelType과 `pmux_agent_s
+        tart`의 차이를 문서/description에 박아야 회고 #3이 줄어든다.
+    70 +
+    71 +## 리스크 top3
+    72 +
+    73 +1. Codex launcher가 `model/effort/sandbox/--no-alt-screen`을 지원하지 않는데 MC
+        P가 적용됐다고 가정하는 리스크. 반환값에 실제 적용/무시를 노출하고, `recommende
+        dFileOutput`은 실제 sandbox 확인 전 보수적으로 계산해야 한다.
+    74 +2. hook/notify 누락 또는 stale `busy` 리스크. `busy`는 send 거부가 맞지만 timeo
+        ut 결과에 raw state와 tail을 충분히 줘야 수동 복구가 가능하다.
+    75 +3. `agent_blocked` 추가에 따른 표면 불일치 리스크. `wait_ready/send/status/turn
+        ` 모두 같은 상태명을 쓰지 않으면 LLM 라우팅이 다시 흔들린다.
+    76 +
+    77 +## 최종 의견
+    78 +
+    79 +R0+R1+R2 설계는 승인한다. R0는 v2.2의 우선순위 1번으로 넣는 것이 맞고, R1은 fal
+        lback으로 강등된 상태에서도 내 턴1 제안을 충분히 반영했다. Codex 쪽 구현 전제는
+         "launcher 경유 시 옵션 적용 여부를 확인하고, 불확실한 것은 명시 반환한다"로 게
+        이트하면 된다.
+
+• Explored
+  └ Read codex-v22-turn2.md
+
+───────────────────────────────────────────────────────────────────────────────────────
+
+• REPORT_READY codex v22-turn2
+
+─ Worked for 1m 24s ───────────────────────────────────────────────────────────────────
+
+
+› Explain this codebase
+
+  gpt-5.5 high · ~/workspace/purplemux-mcp · main · 5h 90% left · weekly 68% left · Wo…

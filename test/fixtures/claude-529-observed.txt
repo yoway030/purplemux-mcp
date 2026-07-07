@@ -1,0 +1,12 @@
+  reports/sworker-v22-turn3.md, pane에
+  REPORT_READY sworker v22-turn3
+● API Error: 529 Overloaded. This is a
+  server-side issue, usually temporary —
+  try again in a moment. If it persists,
+  check https://status.claude.com.
+✻ Worked for 3m 29s
+─────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────
+  codeman
+  ⏵⏵ don't ask on (shift+tab to cycle) · ← for …

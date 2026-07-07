@@ -1,6 +1,10 @@
 import { ToolError } from "./errors.js";
+import type { ReadinessState } from "./pane.js";
 
 export type Provider = "codex" | "claude";
+
+/** tmux foreground-process names that mean "no CLI is running" (design R0.2 step1). */
+export const SHELL_NAMES = ["bash", "zsh", "fish", "sh", "dash"] as const;
 export type Effort = "low" | "medium" | "high" | "xhigh";
 export type Sandbox = "read-only" | "workspace-write";
 export type PermissionMode =
@@ -91,8 +95,18 @@ const CODEX_READY_RE = /›/;
 const CLAUDE_READY_RE = /❯/;
 const CODEX_ERROR_RE = /command not found|unexpected argument/i;
 const CLAUDE_ERROR_RE = /command not found|unexpected argument/i;
-// codex/claude TUIs both show this during generation (§2.2 실측).
-const BUSY_RE = /esc to interrupt/i;
+// codex/claude TUIs both show this during generation (§2.2 실측). R1 adds
+// "Working" and the braille spinner glyph block common CLI spinners animate
+// through — narrowed (턴2, Opus 관찰1, non-blocking) to require the two be
+// adjacent to each other (or "Working" adjacent to an ellipsis/opening
+// paren, e.g. "Working (12s · ...)"), rather than matching either
+// independently anywhere in tail(30). An unqualified `\bworking\b` or a bare
+// braille glyph anywhere in the tail is too broad for a pane fallback — the
+// former can appear in ordinary response prose ("the script is working"),
+// and the latter in unrelated Unicode content; requiring status-bar-style
+// adjacency keeps the busy signal tied to an actual spinner context.
+const BUSY_RE =
+  /esc to interrupt|\bworking\b\s*(?:\.{3}|…|\(|[⠀-⣿])|[⠀-⣿]\s*\bworking\b/i;
 
 export function defaultReadyPattern(p: Provider): RegExp {
   return p === "codex" ? CODEX_READY_RE : CLAUDE_READY_RE;
@@ -104,6 +118,53 @@ export function defaultErrorPattern(p: Provider): RegExp {
 
 export function defaultBusyPattern(_p: Provider): RegExp {
   return BUSY_RE;
+}
+
+// R1 frame signatures — status-bar tells that are present regardless of
+// composer content, used to confirm "this really is the CLI's frame" before
+// trusting readiness on a pane that doesn't match the fast glyph path.
+const CODEX_FRAME_SIGNATURES: readonly RegExp[] = [
+  /Read Only/,
+  /Workspace/,
+  /gpt-/,
+  /·/,
+];
+const CLAUDE_FRAME_SIGNATURES: readonly RegExp[] = [
+  /─{3,}/, // input box border
+  /shift\+tab/i, // status-line mode-cycle hint
+  /for agents/i, // status-line
+  /⏵⏵/, // status-line permission-mode glyph
+];
+
+/** Status-bar signature patterns for the given provider (design R1, frameSeen). */
+export function frameSignaturePatterns(p: Provider): readonly RegExp[] {
+  return p === "codex" ? CODEX_FRAME_SIGNATURES : CLAUDE_FRAME_SIGNATURES;
+}
+
+/**
+ * Map purplemux's native `cliState` (design R0.1b live-PoC table) to our
+ * ReadinessState. Deliberately an open set: any value not in the table
+ * (including "idle"/"unknown"/future vocabulary) returns null so the caller
+ * falls back to the pane heuristic (R1) rather than guessing.
+ */
+export function mapCliState(
+  provider: Provider,
+  cliState: string,
+): ReadinessState | null {
+  switch (cliState) {
+    case "busy":
+      return "agent_busy";
+    case "notification":
+      return "agent_blocked";
+    case "needs-input":
+      return "agent_ready";
+    case "ready-for-review":
+      // codex: turn-completion vocabulary → ready. claude: plan-approval
+      // wait → blocked (design R0.1b, provider-specific — no blanket mapping).
+      return provider === "codex" ? "agent_ready" : "agent_blocked";
+    default:
+      return null;
+  }
 }
 
 /**

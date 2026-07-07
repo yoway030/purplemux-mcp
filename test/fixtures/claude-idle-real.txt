@@ -1,0 +1,61 @@
+       2
+       3 # opus v2.2-turn1 — 스코프 검토
+       5 ## 총평
+       6 오케스트레이터 스코프안 R1~R5는 회고 5건을 정확히 겨냥했고, design-v2 원칙(결정론·pane
+          위에 서 있어 실화면 캡처로 게이트해야 하고, (b) R3 복합툴은 유계·재개 계약이 없으면 M
+         CP 타임아웃/결정론 훼손 위험이 있으며, (c) 회고 #5의 "생성중 vs 입력대기 vs 큐 막힘"
+       7
+       8 ## 항목별 판정
+      10 ### R1 readiness 재설계 — AGREE, 단 실화면 캡처 선행 게이트
+     … +99 lines
+
+● REPORT_READY opus v22-turn1
+
+✻ Crunched for 3m 28s
+
+❯ [v22-턴2 — 설계 합의] 중대 업데이트: 사용자 제안으로 purplemux 본체의 상태 감지 방식을 조사한 결과,
+  훅 push 기반(cliState/command 필드)임을 확인하고 라이브 PoC까지 마쳤습니다(busy→needs-input 전이
+  실측). 이를 R0(최우선)으로 스코프에 추가했습니다. docs/worklog-20260707-workflow/design-v22.md 를
+  정독하고 판정하세요. 당신의 턴1 조건(R1 실화면 캡처 게이트→fixture 테스트, R3 유계·재개 계약, R3
+  분리 게이트, 큐잉 편입, 마커 단축 우선+roundtrip, capture -J 조사)이 반영됐는지 + R0 설계(훅 주입
+  launch, cliState 사다리, agent_blocked 상태, 열린 집합 처리)의 타당성·리스크를 평가하세요. 파일
+  보고: reports/opus-v22-turn2.md (1줄차 APPROVE|REJECT), pane엔 REPORT_READY opus v22-turn2
+
+● I'll read the new design-v22.md and evaluate whether my turn-1 conditions were reflected and assess
+  the R0 hook-based redesign.
+
+  Read 1 file
+
+● design-v22.md is a strong update. Let me verify the one security-relevant detail — whether
+  workspaceId (now interpolated into a shell command in the codex launcher path) is currently
+  validated anywhere.
+
+  Searched for 1 pattern, read 1 file
+
+● Confirmed the injection concern: workspaceId is only z.string().min(1) with no allowlist
+  (schemas.ts:18). Safe today (HTTP-encoded only), but R0.1's codex launcher interpolates it into a
+  shell command sent to the pane — a new injection vector. Writing the report.
+
+● Write(docs/worklog-20260707-workflow/reports/opus-v22-turn2.md)
+  ⎿  Wrote 50 lines to docs/worklog-20260707-workflow/reports/opus-v22-turn2.md
+       1 APPROVE (설계 승인 — R0 방향 타당·PoC 근거 견고. 단 구현 게이트 7건: workspaceId allow
+         stale race, 공통 사다리 step1 무상태 모호성, agent_blocked 소비자 일관성, R1 fixture=
+       2
+       4
+       6 R0(네이티브 상태 채널)은 v2.1의 정규식 화면판독보다 원칙1(결정론)에 명백히 부합하는 상
+          강등한 결과 나의 턴1 최대 우려(R1이 미검증 경험칙 위에 구축)가 구조적으로 완화됐다.
+         입할 것.
+       8 ## 턴1 조건 반영 확인 (6/6 ✓)
+         인/queued/셸복귀/본문$끝) ✓ — 단 fixture는 **실 캡처에서 추출**해야 함(합성 금지, 과적
+      10 2. R3 유계·재개 계약: §80 timeout→{status:timeout, marker, expectedReportFile, tail},
+     … +83 lines
+
+● REPORT_READY opus v22-turn2
+
+✻ Cogitated for 2m 44s
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ REPORT_READY opus v22-turn2
+──────────────────────────────────────────────────────────────────────────────────────────────────────
+  codeman
+  ⏵⏵ don't ask on (shift+tab to cycle) · ← for agents

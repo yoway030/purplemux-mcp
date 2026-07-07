@@ -1,6 +1,8 @@
 // Live end-to-end test of the purplemux MCP server against the running server.
 // Exercises the real tool round-trip + an error path. Cleans up its tab.
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -60,10 +62,18 @@ const main = async () => {
   const badAgentStart = await call('pmux_agent_start', { workspaceId: WS, provider: 'codex', model: 'gpt-5; rm -rf /' });
   check('agent_start rejects injected model → ToolError', badAgentStart.isError && /model/i.test(j(badAgentStart.text)?.message || badAgentStart.text), (j(badAgentStart.text)?.message || badAgentStart.text).slice(0, 80));
 
+  const badAgentTurn = await call('pmux_agent_turn', { workspaceId: WS, tabId: 'tab-any', provider: 'codex', agentId: 'bad;rm', turn: 1, prompt: 'x', pollTimeoutMs: 1000 });
+  check('agent_turn rejects injected agentId → schema-rejected', (!!badAgentTurn.rpcError || badAgentTurn.isError) && /validation|invalid arguments|agentId/i.test((badAgentTurn.rpcError?.message || '') + badAgentTurn.text), (badAgentTurn.rpcError?.message || badAgentTurn.text).slice(0, 90));
+
   // 4d. real agent_start path: newly-created tab waits for shell before sending codex
   const liveStart = await call('pmux_agent_start', { workspaceId: WS, name: 'mcp-e2e-agent-start', provider: 'codex', sandbox: 'read-only', shellTimeoutMs: 10000 });
   const liveStartJ = j(liveStart.text);
-  check('agent_start live codex returns command', !liveStart.isError && liveStartJ?.provider === 'codex' && typeof liveStartJ?.tabId === 'string' && typeof liveStartJ?.command === 'string' && liveStartJ.state !== 'not_shell_ready', (liveStartJ?.state || liveStartJ?.tabId || liveStart.text).slice(0, 100));
+  const codexHookPath = path.join(homedir(), '.purplemux', 'codex-hook.sh');
+  const expectCodexHooks = existsSync(codexHookPath);
+  check('agent_start live codex returns command', !liveStart.isError && liveStartJ?.provider === 'codex' && typeof liveStartJ?.tabId === 'string' && typeof liveStartJ?.command === 'string' && typeof liveStartJ?.hooksWired === 'boolean' && liveStartJ.state !== 'not_shell_ready', (liveStartJ?.state || liveStartJ?.tabId || liveStart.text).slice(0, 100));
+  const hookEvents = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'PermissionRequest'];
+  const hasAllHookArgs = hookEvents.every((event) => liveStartJ?.command?.includes(`hooks.${event}=`)) && liveStartJ?.command?.includes(codexHookPath);
+  check('agent_start codex hooks assembly', !liveStart.isError && liveStartJ?.hooksWired === expectCodexHooks && (expectCodexHooks ? hasAllHookArgs : !liveStartJ?.command?.includes('hooks.SessionStart=')), `hooksWired=${liveStartJ?.hooksWired}`);
   if (!liveStart.isError && liveStartJ?.tabId) {
     const liveReady = await call('pmux_agent_wait_ready', { workspaceId: WS, tabId: liveStartJ.tabId, provider: 'codex', timeoutMs: 15000, pollMs: 1000 });
     const liveReadyJ = j(liveReady.text);
@@ -90,6 +100,20 @@ const main = async () => {
   const cap = await call('pmux_capture_pane', { workspaceId: WS, tabId });
   const occ = (j(cap.text)?.content || '').split(mark).length - 1;
   check('capture_pane shows auto-submitted output', !cap.isError && occ >= 2, `occurrences=${occ}`);
+
+  const shellTurn = await call('pmux_agent_turn', {
+    workspaceId: WS,
+    tabId,
+    provider: 'codex',
+    agentId: 'shell_turn',
+    turn: 1,
+    prompt: `shell-turn-${mark}`,
+    fileOutput: false,
+    pollTimeoutMs: 1000,
+    pollMs: 500
+  });
+  const shellTurnJ = j(shellTurn.text);
+  check('agent_turn shell tab returns send_failed', !shellTurn.isError && shellTurnJ?.status === 'send_failed' && shellTurnJ?.reason === 'launch_failed', (shellTurnJ?.status || shellTurn.text).slice(0, 100));
 
   // 7b. fake agent marker round-trip via terminal printf → pmux_agent_capture
   const agentId = 'e2e_agent';
@@ -149,14 +173,49 @@ const main = async () => {
 
     const snap = await call('pmux_agent_status', { workspaceId: WS, tabId, provider: 'codex', agentId, turn: fileTurn, requestId: fileReq });
     const snapJ = j(snap.text);
-    check('agent_status snapshot shape', !snap.isError && typeof snapJ?.alive === 'boolean' && typeof snapJ?.readiness?.state === 'string' && snapJ?.doneSignal?.found === true && snapJ?.reportFile?.exists === true && snapJ.reportFile.statusLine === 'complete' && snapJ.reportFile.reqMatch === true && snapJ.reportFile.eofPresent === true && typeof snapJ.tail === 'string', JSON.stringify(snapJ?.reportFile || {}).slice(0, 100));
+    check('agent_status snapshot shape', !snap.isError && typeof snapJ?.alive === 'boolean' && typeof snapJ?.readiness?.state === 'string' && ['cliState', 'pane'].includes(snapJ?.signalSource) && Object.hasOwn(snapJ || {}, 'rawCliState') && !Object.hasOwn(snapJ || {}, 'runtimeError') && snapJ?.doneSignal?.found === true && snapJ?.reportFile?.exists === true && snapJ.reportFile.statusLine === 'complete' && snapJ.reportFile.reqMatch === true && snapJ.reportFile.eofPresent === true && typeof snapJ.tail === 'string', JSON.stringify({ reportFile: snapJ?.reportFile, signalSource: snapJ?.signalSource, rawCliState: snapJ?.rawCliState }).slice(0, 140));
   }
 
-  // 7d. wait_ready detects a failed launch command in a terminal tab
+  // 7d. shortened DONE marker + expectPrevRequestId lets agent_send pass prior-turn validation.
+  const prevGateCreated = await call('pmux_create_tab', { workspaceId: WS, name: 'mcp-e2e-prev-gate', panelType: 'terminal' });
+  const prevGateTabId = j(prevGateCreated.text)?.tabId;
+  check('create_tab previous-turn gate', !prevGateCreated.isError && !!prevGateTabId, `tabId=${prevGateTabId}`);
+  if (prevGateTabId) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const prevReq = '444444444444';
+    const nextReq = '555555555555';
+    const prevTurn = 5;
+    const shortDone = await call('pmux_send_input', {
+      workspaceId: WS,
+      tabId: prevGateTabId,
+      content: `printf '%s\\n' ${sh(`<<<PMUX_DONE req=${prevReq} status=complete>>>`)}; tail -f /dev/null`
+    });
+    check('short DONE marker printf send', !shortDone.isError && j(shortDone.text)?.status === 'sent');
+    await new Promise((r) => setTimeout(r, 1500));
+    const gatedSend = await call('pmux_agent_send', {
+      workspaceId: WS,
+      tabId: prevGateTabId,
+      provider: 'codex',
+      agentId,
+      turn: prevTurn + 1,
+      prompt: `prev-gate-${mark}`,
+      requestId: nextReq,
+      fileOutput: false,
+      expectPrevTurnEnd: prevTurn,
+      expectPrevRequestId: prevReq,
+      skipReadyCheck: true
+    });
+    const gatedSendJ = j(gatedSend.text);
+    check('agent_send accepts shortened previous DONE with requestId', !gatedSend.isError && gatedSendJ?.sent === true && gatedSendJ?.validation?.prevTurnEnd === true, (gatedSendJ?.reason || gatedSend.text).slice(0, 100));
+    const prevGateClose = await call('pmux_close_tab', { workspaceId: WS, tabId: prevGateTabId });
+    check('close previous-turn gate tab', !prevGateClose.isError && j(prevGateClose.text)?.ok === true);
+  }
+
+  // 7e. wait_ready detects a failed launch command in a terminal tab
   const noSuchCmd = await call('pmux_send_input', { workspaceId: WS, tabId, content: `definitely-not-a-command-${mark}` });
   check('send nonexistent command', !noSuchCmd.isError && j(noSuchCmd.text)?.status === 'sent');
   await new Promise((r) => setTimeout(r, 1500));
-  const launchFailed = await call('pmux_agent_wait_ready', { workspaceId: WS, tabId, provider: 'codex', timeoutMs: 3000, pollMs: 500 });
+  const launchFailed = await call('pmux_agent_wait_ready', { workspaceId: WS, tabId, provider: 'codex', timeoutMs: 3000, pollMs: 500, requireBusyTransition: true });
   check('agent_wait_ready launch_failed', !launchFailed.isError && j(launchFailed.text)?.state === 'launch_failed', (j(launchFailed.text)?.state || launchFailed.text).slice(0, 80));
 
   // 8. tab_status alive

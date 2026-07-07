@@ -5,7 +5,7 @@
 An MCP server that lets **Claude Code / Codex** drive a local
 [purplemux](https://github.com/subicura/purplemux) instance (subicura's tmux + LLM
 workspace manager) — controlling workspaces, tabs, terminals, and (Electron) browser panels
-through **16 tools**.
+and **sub-agent orchestration** through **22 tools**.
 
 purplemux's CLI is a thin wrapper over a localhost HTTP API, so this server exposes that API
 directly as MCP tools (calling HTTP, not shelling out to the CLI). That lets an agent
@@ -67,7 +67,16 @@ is absorbed without restarting this server, and no env vars are needed on a norm
 
 ---
 
-## Tools (16)
+## Tools (22)
+
+**Agent orchestration (v2 — recommended entry point):** `pmux_agent_start` · `pmux_agent_wait_ready` ·
+`pmux_agent_send` · `pmux_agent_capture` · `pmux_agent_status` · `pmux_agent_turn`
+
+> Boots claude/codex with purplemux's hooks injected (consuming the native `cliState`/`command`
+> state channel) for deterministic readiness/busy detection, and retrieves responses losslessly
+> via a file protocol (request-id identity + EOF commit double gate). `pmux_agent_turn` bundles
+> send → poll → capture into one call per turn.
+> Design & rationale: [docs/worklog-20260707-workflow/design-v2.md](docs/worklog-20260707-workflow/design-v2.md), [design-v22.md](docs/worklog-20260707-workflow/design-v22.md)
 
 **Terminal/tab (works headless):** `pmux_list_workspaces` · `pmux_list_tabs` ·
 `pmux_create_tab` · `pmux_get_tab` · `pmux_send_input` · `pmux_tab_status` ·
@@ -92,7 +101,8 @@ Full features, install options, and usage examples: **[docs/USAGE.md](docs/USAGE
 
 ```bash
 npm run build && npm run typecheck
-npm run smoke     # handshake + 16 tools + a live list_workspaces
+npm run smoke     # handshake + 22 tools + a live list_workspaces
+npm run unit      # pure-function unit tests (fixture-based)
 npm run e2e       # live round-trip (12 checks) against a running purplemux
 ```
 

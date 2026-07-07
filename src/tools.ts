@@ -94,7 +94,7 @@ export function registerAll(server: McpServer): void {
     "pmux_create_tab",
     {
       description:
-        "Create a tab in a workspace. panelType is one of terminal | claude-code | codex-cli | agent-sessions | web-browser | diff (default terminal); invalid → 400 with validPanelTypes. Creating claude-code/codex-cli without the CLI installed → 409 with suggestedCommand. Returns the created-tab object.",
+        "Create a tab in a workspace. panelType is one of terminal | claude-code | codex-cli | agent-sessions | web-browser | diff (default terminal); invalid → 400 with validPanelTypes. claude-code/codex-cli panelType tabs may be empty shells before UI attaches; for agent orchestration prefer pmux_agent_start. Creating claude-code/codex-cli without the CLI installed → 409 with suggestedCommand. Returns the created-tab object.",
       inputSchema: S.createTabShape,
     },
     guard(async ({ workspaceId, name, panelType }) =>
@@ -127,7 +127,7 @@ export function registerAll(server: McpServer): void {
     "pmux_send_input",
     {
       description:
-        "Send text to a tab. The server AUTO-SUBMITS (delivers as a bracketed paste then presses Enter) — do NOT append a newline to submit. Exactly one trailing '\\n' is stripped from content; other whitespace is preserved. Returns { status:\"sent\" }. 409 'Tab session is not running' if the tmux session is dead.",
+        "Low-level fallback for manual tab input; for agent orchestration prefer pmux_agent_* tools. Send text to a tab. The server AUTO-SUBMITS (delivers as a bracketed paste then presses Enter) — do NOT append a newline to submit. Exactly one trailing '\\n' is stripped from content; other whitespace is preserved. Returns { status:\"sent\" }. 409 'Tab session is not running' if the tmux session is dead.",
       inputSchema: S.sendInputShape,
     },
     guard(async ({ workspaceId, tabId, content }) => {
@@ -169,7 +169,7 @@ export function registerAll(server: McpServer): void {
     "pmux_capture_pane",
     {
       description:
-        "Capture the current pane snapshot as { content }. Not meaningful for web-browser tabs. 409 'Tab session is not running' if the session is dead.",
+        "Low-level fallback for manual pane inspection; for agent orchestration prefer pmux_agent_* tools. Capture the current pane snapshot as { content }. Not meaningful for web-browser tabs. 409 'Tab session is not running' if the session is dead.",
       inputSchema: S.capturePaneShape,
     },
     guard(async ({ workspaceId, tabId }) =>

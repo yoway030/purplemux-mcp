@@ -234,6 +234,11 @@ export const agentWaitReadyShape = {
   readyPattern: userPattern("readyPattern"),
   errorPattern: userPattern("errorPattern"),
   busyPattern: userPattern("busyPattern"),
+  runtimeErrorPattern: userPattern("runtimeErrorPattern"),
+  requireBusyTransition: z
+    .boolean()
+    .optional()
+    .describe("Defaults false for boot readiness. Set true when waiting after send; ready is returned only after a busy state has been observed."),
 } as const;
 
 export const agentSendShape = {
@@ -259,7 +264,10 @@ export const agentSendShape = {
     .int()
     .min(0)
     .optional()
-    .describe("If set, the pane must contain the previous turn's END marker before sending."),
+    .describe("If set, the pane must contain the previous turn's completion marker before sending. For fileOutput=true turns, pair this with expectPrevRequestId."),
+  expectPrevRequestId: requestId.describe(
+    "Optional previous turn request id. Use with expectPrevTurnEnd for fileOutput=true prior-turn validation.",
+  ),
   skipReadyCheck: z
     .boolean()
     .optional()
@@ -267,6 +275,24 @@ export const agentSendShape = {
   readyPattern: userPattern("readyPattern"),
   errorPattern: userPattern("errorPattern"),
   busyPattern: userPattern("busyPattern"),
+  runtimeErrorPattern: userPattern("runtimeErrorPattern"),
+} as const;
+
+export const agentTurnShape = {
+  ...agentSendShape,
+  pollTimeoutMs: z
+    .number()
+    .int()
+    .min(1)
+    .max(300000)
+    .optional()
+    .describe("Total polling timeout in ms after a successful send. Defaults to 120000; max 300000."),
+  pollMs: z
+    .number()
+    .int()
+    .min(500)
+    .optional()
+    .describe("Polling interval in ms after a successful send. Defaults to 2000; minimum 500."),
 } as const;
 
 export const agentCaptureShape = {
@@ -291,4 +317,5 @@ export const agentStatusShape = {
   readyPattern: userPattern("readyPattern"),
   errorPattern: userPattern("errorPattern"),
   busyPattern: userPattern("busyPattern"),
+  runtimeErrorPattern: userPattern("runtimeErrorPattern"),
 } as const;

@@ -122,3 +122,40 @@ node test/e2e.mjs     # 라이브 라운드트립 12케이스 (스크래치 탭 
 - [`docs/worklog/`](worklog/) — 단계별 작업 기록 (추출→설계→작업→리뷰→테스트)
 - [`docs/panel/`](panel/) — 3에이전트(Sonnet/Opus/Codex) 단계별 초안(프로세스 근거)
 - [`docs/reference/`](reference/) — 추출에 사용한 고정 입력(api-guide, cli.js 등)
+
+---
+
+## 6. 에이전트 오케스트레이션 cookbook (`pmux_agent_*`)
+
+기본 16툴 위에 다른 AI 에이전트(claude/codex CLI)를 직접 운전하기 위한 상위 계층. `agent_*` = primary, `send_input`/`capture_pane`은 저수준 폴백.
+
+### 권장 워크플로
+
+1. `pmux_list_workspaces` — workspaceId 확인
+2. `pmux_agent_start` — 탭 생성 + CLI 런치. 응답의 **`hooksWired`**(훅 주입 성공 여부)와 **`recommendedFileOutput`**(read-only/plan 에이전트는 `false`)을 반드시 확인
+3. `pmux_agent_wait_ready` — 준비 대기
+4. `pmux_agent_turn`(send+폴링+회수 한 번에 — **대부분 이것만으로 충분**) 또는 `pmux_agent_send`+`pmux_agent_capture`(직접 폴링하고 싶을 때)
+5. 작업이 끝나면 **반드시** `pmux_close_tab`으로 정리
+
+### 훅 세션 vs 비훅 세션 (`signalSource`)
+
+`wait_ready`/`status`/`send`/`turn` 응답의 `signalSource`로 판정 근거를 확인한다:
+- **`"cliState"`** — `hooksWired:true`(claude: `~/.purplemux/hooks.json`, codex: `~/.purplemux/codex-hook.sh` 존재) 세션. purplemux 훅 push 기반 결정론적 신호(`needs-input`/`ready-for-review`/`busy`/`notification`)를 사용 — 신뢰도 높음.
+- **`"pane"`** — `hooksWired:false` 세션. 화면 텍스트 휴리스틱 폴백(R1) — 훅 세션보다 덜 정확하니 `wait_ready` timeout이나 판정이 애매하면 아래 폴백을 쓴다.
+
+### fileOutput 라우팅 (`recommendedFileOutput`)
+
+- `recommendedFileOutput:true`(codex `workspace-write` / claude non-`plan`) → `fileOutput` 기본값(`true`)을 그대로 둔다. 응답이 길어도 파일로 안전하게 회수된다.
+- `recommendedFileOutput:false`(read-only/plan — 파일 쓰기 권한 없음) → `send`/`turn` 호출 시 **`fileOutput:false`**를 명시해 pane BEGIN/END 폴백을 쓴다.
+
+### 문제 시 폴백
+
+- `wait_ready` timeout, 또는 상태 판정이 불확실할 때 → `pmux_capture_pane`으로 화면을 직접 확인한다.
+- `agent_blocked`(승인/리뷰 대기 등) → 반환된 `tail`을 보고 상황을 판단 — 필요하면 `pmux_send_input`으로 직접 승인/거절을 입력한다.
+
+### runtimeError 발견 시 재지시 패턴 (design R6)
+
+`wait_ready`/`status`/`send`/`turn` 응답의 `runtimeError?:{match,line}`는 **readiness와 별개의 사실**이다 — ready인 세션도 직전 턴이 529/rate-limit 등으로 조용히 죽었을 수 있다:
+- `runtimeError`가 있고 완료 신호(DONE 마커/report 파일)도 없다면, 그 턴은 사실상 유실된 것으로 보고 **같은 프롬프트를 재전송**한다.
+- `pmux_agent_turn`은 완료 증거 없이 ready+`runtimeError`를 감지하면 timeout까지 기다리지 않고 `{status:"agent_error", runtimeError, tail}`을 조기 반환한다 — 이 경우 바로 재시도 여부를 판단하면 된다.
+- 본문이 "API Error" 등을 인용만 한 경우(예: 에러 핸들링 코드 리뷰)도 `found:true`가 될 수 있다 — `{match,line}`을 보고 실제 실패인지 판단할 것.
