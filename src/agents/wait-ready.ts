@@ -293,6 +293,12 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
         tail,
       });
     }
+    // READINESS LADDER (wait-ready variant) — one of three deliberately
+    // DIFFERENT ladders; do not unify without a behavior review (worklog
+    // plan-sustainability-refactor.md 비목표). Here: input_queued promotes
+    // to ready only in plain boot mode (no expectEcho, no busy-transition
+    // requirement). Compare: turn.ts sendAgentPrompt (turn <= 1 promotion
+    // with validation warning), readiness.ts classifyTurnReadiness (none).
     if (
       !expectEcho &&
       !requireBusyTransition &&

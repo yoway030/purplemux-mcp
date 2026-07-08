@@ -105,6 +105,12 @@ function isReadyStateForTurn(state: NativeState | ReturnType<typeof classifyRead
   return state === "agent_ready";
 }
 
+// READINESS LADDER (turn-poll variant) — one of three deliberately DIFFERENT
+// ladders; do not unify without a behavior review (worklog
+// plan-sustainability-refactor.md 비목표). Here: NO input_queued promotion —
+// mid-turn a queued composer means the prompt is still pending, never ready.
+// Compare: turn.ts sendAgentPrompt (turn <= 1 promotion + warning),
+// wait-ready.ts runWaitReady (boot-mode promotion, expectEcho demotion).
 export async function classifyTurnReadiness(o: {
   workspaceId: string;
   tabId: string;

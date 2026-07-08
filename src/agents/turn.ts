@@ -172,6 +172,12 @@ export async function sendAgentPrompt(args: AgentSendArgs): Promise<AgentSendVal
         runtimeErrorPattern,
       );
     }
+    // READINESS LADDER (send variant) — one of three deliberately DIFFERENT
+    // ladders; do not unify without a behavior review (worklog
+    // plan-sustainability-refactor.md 비목표). Here: input_queued promotes to
+    // ready only on turn <= 1, and always tags a validation warning.
+    // Compare: wait-ready.ts (expectEcho demotion + boot-mode promotion),
+    // readiness.ts classifyTurnReadiness (no promotion at all).
     if (
       classified.state === "agent_starting" &&
       classified.reason === "input_queued" &&
