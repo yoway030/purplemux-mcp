@@ -124,6 +124,7 @@ node test/e2e.mjs     # 라이브 라운드트립 12케이스 (스크래치 탭 
 ## 4. 주의사항 / 알려진 특성
 
 - **`send_input`은 자동 제출**된다(서버가 Enter). content에 개행을 넣지 말 것 — 넣어도 trailing `\n` 1개는 제거된다. (라이브 실측으로 확정)
+- **기본 model/effort는 고정 주입**된다(codex `-m gpt-5.5`+medium, claude `--model claude-sonnet-5`+high) — claude는 `--effort` 플래그가 있는 **>=2.1.202** 필요, codex는 `~/.codex/config.toml`의 model 설정보다 이 기본값이 우선. 다른 구성이 필요하면 start 호출에 model/effort를 명시.
 - **브라우저 툴은 Electron 전용.** headless purplemux에서는 503. 브라우저 6종을 제외한 툴은 라이브 검증됨(브라우저 6종은 설계·구현 완료, Electron 환경에서 검증 예정).
 - 포트값은 정수 1–65535만 허용(오염된 `PMUX_PORT`로 토큰이 외부 호스트로 새는 것 차단).
 - `memory`/`mem`은 purplemux에 실제 구현이 없어(dead command) MCP에 노출하지 않음.

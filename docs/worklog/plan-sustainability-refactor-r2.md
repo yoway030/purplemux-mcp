@@ -92,3 +92,21 @@ wait-ready.ts jsonResult 11벌 구조 반복, Effort/Sandbox/PermissionMode
 - 각 단계 후 `npm test`(build+unit 135+smoke 23) + typecheck.
 - D4 후 라이브 e2e(33케이스 — send/wait_ready 응답 필드 실검증 포함) 필수.
 - 최종 codex/claude 리뷰 합의(특히 D4 분기별 JSON 보존).
+
+## 결과 (2026-07-08, 전 항목 완료 + codex/claude 최종 리뷰 합의)
+
+- D1~D5 전부 이행 + 병행 feat(표준 기본 model/effort — 사용자 지정). 커밋:
+  feat(기본모델) → D1 → D2 → D3 → D4/D5 → 리뷰 NIT 반영.
+- **최종 리뷰 양측 합의, BLOCKING 0건.** codex: D4 emit 11분기·fail 8분기
+  전수 base 대조 일치, D1~D3·기본값 주입 전 영역 0건. claude: 정적 재구성에
+  더해 **가짜 purplemux 서버 대상 차등 실행 하네스(18시나리오)**로 base와
+  HEAD 출력 byte 동일 실증(elapsedMs만 마스킹), wire 표면(instructions +
+  tools/list) diff는 승인된 기능 문자열 4건뿐.
+- 리뷰 지적 반영: e2e 미사용 send 제거(NIT), 기본값 고정 주입의 환경 요건
+  (claude >=2.1.202, codex config.toml 우선순위)을 USAGE 주의사항에 문서화
+  (SHOULD). ID_RE.source 앵커 가정은 코드 주석으로 이미 문서화 — 유지.
+- 수치: turn.ts 477→409줄, wait-ready.ts 355→272줄, 데드 export 3건 삭제 +
+  내부 전용 5건 unexport, noUnusedLocals/noUnusedParameters 상시 게이트,
+  unit 136개(前 라운드 표기 135는 feat 커밋의 +1 반영 전 수치).
+- 검증: build/typecheck/unit 136/smoke 23 그린, 라이브 e2e 33/33 (D3 후,
+  D4 후 각 1회).

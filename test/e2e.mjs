@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createClient } from './lib/mcp-client.mjs';
 
 const WS = process.env.PMUX_TEST_WS || 'ws-UJm6NN';
-const { srv, send, rpc, initialize } = createClient();
+const { srv, rpc, initialize } = createClient();
 const call = async (name, args = {}) => {
   const r = await rpc('tools/call', { name, arguments: args });
   const text = (r.result?.content || []).map((c) => c.text ?? `[${c.type}:${(c.data||'').length}b]`).join('');
