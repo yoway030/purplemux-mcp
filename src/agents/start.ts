@@ -138,20 +138,26 @@ export function recommendedFileOutput(args: AgentStartArgs): boolean {
   return (args.permissionMode ?? "plan") !== "plan";
 }
 
+export function defaultBootstrapEcho(args: AgentStartArgs): boolean {
+  return args.provider === "codex";
+}
+
 export async function runAgentStart(args: AgentStartArgs): Promise<CallToolResult> {
   validateModel(args.model);
   const base = buildAgentCommand(args);
   const bootId = generateRequestId();
   const bootFile = bootFilePath(bootId);
   const wired = await wireHooksAndBoot(args, base.command, bootId);
-  const bootstrapEcho = args.bootstrapEcho ?? true;
+  const bootstrapEcho = args.bootstrapEcho ?? defaultBootstrapEcho(args);
   // `env VAR=… cmd` (not the bare VAR=… prefix) so fish shells work too.
   let command = wired.bootWired
     ? `env PMUX_BOOT_FILE=${shellQuote(bootFile)} ${wired.command}`
     : wired.command;
   if (bootstrapEcho) {
     // Positional initial prompt LAST, after every flag (auto-submitted
-    // by both CLIs — 실측 2026-07-08). Fixed template; only the hex
+    // by both CLIs — 실측 2026-07-08). Claude does not use this by default
+    // because a synthetic boot token can trigger needless interpretation.
+    // Fixed template; only the hex
     // bootId is interpolated, so the §4.6 allowlist invariant holds.
     command = `${command} ${shellQuote(buildBootstrapEchoPrompt(bootId))}`;
   }
@@ -159,7 +165,7 @@ export async function runAgentStart(args: AgentStartArgs): Promise<CallToolResul
   const fileOutputHint = recommendedFileOutput(args);
   const next = bootstrapEcho
     ? "pmux_agent_wait_ready에 bootId와 expectEcho:true를 전달해 echo 완료를 확인한 뒤 turn=1부터 작업 전송 (bootstrap이 turn 0을 소비하므로 사용자 턴은 1부터, turn 1에는 expectPrevTurnEnd를 주지 말 것)"
-    : "pmux_agent_wait_ready(bootId 전달 권장) 후 pmux_agent_send 또는 pmux_agent_turn";
+    : "pmux_agent_wait_ready(bootId 전달 권장, expectEcho:false) 후 turn=1부터 pmux_agent_send 또는 pmux_agent_turn";
   const bootFields = {
     bootId,
     bootFile,

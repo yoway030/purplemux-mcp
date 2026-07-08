@@ -16,7 +16,7 @@ localhost HTTP API를 그대로 노출해, AI 에이전트가 워크스페이스
 | 툴 | 하는 일 |
 |---|---|
 | `pmux_agent_start` | 터미널 탭 생성 + claude/codex CLI 런치 (훅 주입 · 부트 신호 · bootstrap echo 배선). `bootId`·`recommendedFileOutput` 반환 |
-| `pmux_agent_wait_ready` | 준비 폴링 — `{bootId, expectEcho:true}`면 bootstrap echo 완료 증거로만 ready 판정 |
+| `pmux_agent_wait_ready` | 준비 폴링 — `bootId`를 전달하고, `bootstrapEcho:true`로 시작한 세션에서만 `expectEcho:true` 사용 |
 | `pmux_agent_turn` | 1턴 복합 툴: send → 폴링 → 응답 회수 (**대부분 이것만으로 충분**) |
 | `pmux_agent_send` | 프롬프트 전송 (readiness 검증 + v2.1 파일 프로토콜 footer 부착) |
 | `pmux_agent_capture` | 응답 회수 (report 파일 → pane 마커 폴백) |
@@ -150,8 +150,8 @@ node test/e2e.mjs     # 라이브 라운드트립 12케이스 (스크래치 탭 
 1. `pmux_list_workspaces` — workspaceId 확인
 2. **model/effort 기본값 확인** — 생략 시 표준 기본값이 적용된다: codex=`gpt-5.5`+`medium`, claude=`claude-sonnet-5`+`high` (2026-07-08 사용자 지정). 기본값과 다른 구성이 필요할 때만 사용자에게 확인. sandbox/permissionMode는 작업 성격에 맞게 선택
 3. `pmux_agent_start` — 탭 생성 + CLI 런치 + 부트 배선. 응답의 **`bootId`**, **`hooksWired`**(훅 주입 성공 여부), **`recommendedFileOutput`**(read-only/plan 에이전트는 `false`)을 확인
-4. `pmux_agent_wait_ready` `{bootId, expectEcho:true}` — bootstrap echo의 DONE 마커(완료 증거)가 보여야만 `agent_ready` (기본 timeout 90s)
-5. `pmux_agent_turn` — **turn=1부터** (bootstrap echo가 turn 0을 소비; turn 1에는 `expectPrevTurnEnd` 금지). `agentId`는 호출자가 직접 정한다(짧은 id를 만들어 이 탭의 모든 턴에 재사용; `boot`는 bootstrap echo 예약어라 금지). send+폴링+회수 한 번에 — **대부분 이것만으로 충분**. 직접 폴링하려면 `pmux_agent_send`+`pmux_agent_capture`
+4. `pmux_agent_wait_ready` — `bootId`를 전달한다. codex 기본 경로(`bootstrapEcho:true`)에서는 `{expectEcho:true}`를 함께 전달해 bootstrap echo의 DONE 마커(완료 증거)를 기다린다. claude 기본 경로(`bootstrapEcho:false`)에서는 `expectEcho`를 생략하고 cliState/pane readiness와 부트 파일 진단을 사용한다.
+5. `pmux_agent_turn` — **turn=1부터** (`turn 1`에는 `expectPrevTurnEnd` 금지). `agentId`는 호출자가 직접 정한다(짧은 id를 만들어 이 탭의 모든 턴에 재사용; `boot`는 bootstrap echo 사용 시 예약어라 피한다). send+폴링+회수 한 번에 — **대부분 이것만으로 충분**. 직접 폴링하려면 `pmux_agent_send`+`pmux_agent_capture`
 6. 작업이 끝나면 **반드시** `pmux_close_tab`으로 정리
 
 ### 부트 검증 (`bootId` · bootstrap echo)
@@ -162,9 +162,10 @@ node test/e2e.mjs     # 라이브 라운드트립 12케이스 (스크래치 탭 
   `wait_ready` 응답의 `boot.fileSeen`으로 보고 — **진단 전용**(ready 판정에 불사용).
   단, start 응답의 `bootWired:false`(훅 배선 실패 → 일반 런치로 강등)면 부트 파일은 영원히
   생기지 않으므로 `fileSeen:false`에 아무 신호도 없다 — 먼저 `bootWired`를 확인할 것.
-- **bootstrap echo** (`bootstrapEcho`, 기본 true): 고정 초기 프롬프트로 **모델**이 DONE 마커를
-  출력하게 한다. `expectEcho:true`면 이 증거로만 ready 판정. 모델 턴 1회 비용 —
-  `bootstrapEcho:false`로 생략 가능(그러면 휴리스틱 판정으로 폴백).
+- **bootstrap echo** (`bootstrapEcho`): 고정 초기 프롬프트로 **모델**이 DONE 마커를
+  출력하게 한다. 기본값은 codex=true, claude=false. `expectEcho:true`면 이 증거로만 ready 판정.
+  Claude는 합성 마커가 모니터링/프로토콜 텍스트처럼 보여 불필요한 해석을 유발할 수 있어 기본 생략한다.
+  활성화하면 모델 턴 1회 비용이 든다.
 
 echo timeout 시 2비트 진단: `fileSeen:false` → 런치/훅 문제, `fileSeen:true`+echo 없음 →
 프로세스는 떴는데 모델이 무응답(인증/limit/행업 — tail 확인).

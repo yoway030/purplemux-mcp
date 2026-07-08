@@ -218,7 +218,7 @@ export const agentStartShape = {
     .boolean()
     .optional()
     .describe(
-      "Defaults to true. Appends a fixed single-line initial prompt (positional arg, auto-submitted by both CLIs) asking the agent to print the bootstrap DONE marker, so pmux_agent_wait_ready with {bootId, expectEcho:true} can verify the LLM actually responds — evidence-based boot readiness. Costs one tiny model turn; set false to skip.",
+      "Defaults to true for codex and false for claude. When true, appends a fixed single-line initial prompt (positional arg, auto-submitted by both CLIs) asking the agent to print the bootstrap DONE marker, so pmux_agent_wait_ready with {bootId, expectEcho:true} can verify the LLM actually responds. Claude defaults false because synthetic boot tokens can trigger needless interpretation. Costs one tiny model turn; set explicitly to override.",
     ),
 } as const;
 
@@ -255,7 +255,7 @@ export const agentWaitReadyShape = {
   expectEcho: z
     .boolean()
     .optional()
-    .describe("Requires bootId, and is only meaningful when the agent was STARTED with bootstrapEcho:true (the default) — with bootstrapEcho:false no echo will ever arrive and this would time out. When true, agent_ready is returned ONLY once the bootstrap-echo DONE marker (req=bootId) is on the pane — evidence-based boot readiness that supersedes ready-pattern heuristics and requireBusyTransition."),
+    .describe("Requires bootId, and is only meaningful when the agent was STARTED with bootstrapEcho:true (codex default; claude only when explicitly enabled) — with bootstrapEcho:false no echo will ever arrive and this would time out. When true, agent_ready is returned ONLY once the bootstrap-echo DONE marker (req=bootId) is on the pane — evidence-based boot readiness that supersedes ready-pattern heuristics and requireBusyTransition."),
 } as const;
 
 export const agentSendShape = {

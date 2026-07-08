@@ -28,6 +28,25 @@ check("guide: golden-path tools are documented in both texts", () => {
   }
 });
 
+check("guide: boot echo policy is provider-specific", () => {
+  assert(
+    SERVER_INSTRUCTIONS.includes("codex's default bootstrapEcho:true"),
+    "instructions must say codex uses bootstrap echo by default",
+  );
+  assert(
+    SERVER_INSTRUCTIONS.includes("claude's default bootstrapEcho:false"),
+    "instructions must say claude skips bootstrap echo by default",
+  );
+  assert(
+    ORCHESTRATION_GUIDE.includes("defaults to true for codex and"),
+    "guide must document codex default",
+  );
+  assert(
+    ORCHESTRATION_GUIDE.includes("false for claude"),
+    "guide must document claude default",
+  );
+});
+
 check("guide: SERVER_INSTRUCTIONS stays concise (injected into every session)", () => {
   assert(
     SERVER_INSTRUCTIONS.length < 3000,

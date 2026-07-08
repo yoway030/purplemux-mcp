@@ -9,7 +9,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { check, checkAsync, assert, assertEqual } from "./helpers.mjs";
 
 import { compileAllPatterns } from "../../dist/agents/readiness.js";
-import { looksShellReady, recommendedFileOutput } from "../../dist/agents/start.js";
+import {
+  defaultBootstrapEcho,
+  looksShellReady,
+  recommendedFileOutput,
+} from "../../dist/agents/start.js";
 import { extractTabId, sessionName } from "../../dist/agents/api.js";
 import { buildPaneFallbackFooter, reportFileStatus } from "../../dist/agents/report.js";
 import { makeMarkers } from "../../dist/pane.js";
@@ -59,6 +63,13 @@ check("recommendedFileOutput: claude permissionMode routing (default plan → fa
   assertEqual(recommendedFileOutput({ provider: "claude" }), false);
   assertEqual(recommendedFileOutput({ provider: "claude", permissionMode: "plan" }), false);
   assertEqual(recommendedFileOutput({ provider: "claude", permissionMode: "acceptEdits" }), true);
+});
+
+// ---- defaultBootstrapEcho ------------------------------------------------
+
+check("defaultBootstrapEcho: codex keeps echo evidence, claude avoids synthetic boot prompt by default", () => {
+  assertEqual(defaultBootstrapEcho({ provider: "codex" }), true);
+  assertEqual(defaultBootstrapEcho({ provider: "claude" }), false);
 });
 
 // ---- looksShellReady --------------------------------------------------------

@@ -22,8 +22,8 @@ Golden path for a subagent:
 1. pmux_list_workspaces → workspaceId
 2. Model/effort defaults are preconfigured (codex=gpt-5.5+medium, claude=claude-sonnet-5+high) — launch with them; ask the user only when a different configuration seems needed (codex sandbox / claude permissionMode follow the task)
 3. pmux_agent_start → returns tabId, bootId, recommendedFileOutput
-4. pmux_agent_wait_ready {bootId, expectEcho:true} → agent_ready only on bootstrap-echo completion evidence
-5. pmux_agent_turn from turn=1 (turn 0 was the bootstrap echo; do not pass expectPrevTurnEnd on turn 1). agentId is caller-chosen: pick a short id (e.g. "worker1"; not "boot" — reserved by the bootstrap echo) and reuse it for every turn of this tab. If recommendedFileOutput was false, pass fileOutput:false.
+4. pmux_agent_wait_ready with bootId. For codex's default bootstrapEcho:true, pass expectEcho:true; for claude's default bootstrapEcho:false, leave expectEcho false.
+5. pmux_agent_turn from turn=1 (do not pass expectPrevTurnEnd on turn 1). agentId is caller-chosen: pick a short id (e.g. "worker1"; avoid "boot" because it is reserved when bootstrapEcho is enabled) and reuse it for every turn of this tab. If recommendedFileOutput was false, pass fileOutput:false.
 6. pmux_close_tab when the task is finished
 
 For failure modes, recovery patterns, and full semantics call pmux_guide. For the purplemux HTTP API reference call pmux_api_guide. Browser tools need Electron (503 when headless); web-browser tabs always report alive:false — that is normal, not a dead tab.`;
@@ -64,15 +64,18 @@ full protocol control.
 3. \`pmux_agent_start {workspaceId, provider, model?, effort?, sandbox?/permissionMode?}\`
    → returns \`tabId\`, \`bootId\`, \`hooksWired\`, \`recommendedFileOutput\`,
    \`bootstrapEcho\`. Non-blocking: the CLI is still booting.
-4. \`pmux_agent_wait_ready {workspaceId, tabId, provider, bootId, expectEcho:true}\`
-   → \`agent_ready\` is returned **only** when the bootstrap echo's DONE
-   marker appears (completion evidence — the model demonstrably answered).
+4. \`pmux_agent_wait_ready {workspaceId, tabId, provider, bootId, expectEcho?}\`
+   → for codex's default \`bootstrapEcho:true\`, pass \`expectEcho:true\` and
+   \`agent_ready\` is returned only when the bootstrap echo's DONE marker
+   appears. For claude's default \`bootstrapEcho:false\`, leave \`expectEcho\`
+   false; readiness then comes from cliState/pane signals plus the diagnostic
+   boot file.
 5. Work turns with \`pmux_agent_turn {workspaceId, tabId, provider, agentId, turn, prompt, ...}\`:
    - \`agentId\` is **caller-chosen**: invent a short id (\`^[a-z0-9][a-z0-9_-]{0,31}$\`,
-     e.g. \`worker1\`; not \`boot\` — reserved by the bootstrap echo) and reuse
+     e.g. \`worker1\`; avoid \`boot\`, which is reserved when bootstrap echo is enabled) and reuse
      it for every turn of this tab, so report-file paths and prev-turn
      markers line up.
-   - **turn starts at 1** (the bootstrap echo consumed turn 0). Do not pass
+   - **turn starts at 1**. Do not pass
      \`expectPrevTurnEnd\` on turn 1. On later turns it is optional strictness:
      \`pmux_agent_turn\` is already safe to call right after a previous turn;
      pass \`expectPrevTurnEnd\` + \`expectPrevRequestId\` only when you want the
@@ -93,11 +96,12 @@ full protocol control.
   Check \`bootWired\` in the start response first: when it is \`false\` (hook
   wiring failed and the server degraded to a plain launch), no boot file
   will ever be written and \`fileSeen:false\` carries no signal.
-- **Bootstrap echo** (\`bootstrapEcho\`, default true): a fixed initial prompt
-  makes the *model* print a DONE marker (req=bootId). \`wait_ready\` with
-  \`{bootId, expectEcho:true}\` returns \`agent_ready\` only on this evidence.
-  Costs one tiny model turn; pass \`bootstrapEcho:false\` to skip (then
-  readiness falls back to heuristics).
+- **Bootstrap echo** (\`bootstrapEcho\`): a fixed initial prompt makes the
+  *model* print a DONE marker (req=bootId). It defaults to true for codex and
+  false for claude. \`wait_ready\` with \`{bootId, expectEcho:true}\` returns
+  \`agent_ready\` only on this evidence. Claude defaults false because the
+  synthetic marker can look like monitoring/protocol text and trigger
+  unnecessary interpretation. Costs one tiny model turn when enabled.
 
 On an \`expectEcho\` timeout, the two bits diagnose the failure:
 
