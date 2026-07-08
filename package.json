@@ -1,7 +1,7 @@
 {
   "name": "purplemux-mcp",
   "version": "0.1.0",
-  "description": "MCP server for the purplemux localhost HTTP API (16 tools over stdio).",
+  "description": "MCP server exposing the purplemux localhost HTTP API over stdio — terminal, browser, and agent-orchestration tools.",
   "type": "module",
   "bin": {
     "purplemux-mcp": "dist/index.js"
@@ -10,12 +10,14 @@
     "dist"
   ],
   "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "smoke": "node test/smoke.mjs",
     "e2e": "node test/e2e.mjs",
-    "unit": "node test/unit.mjs"
+    "unit": "node test/unit.mjs",
+    "test": "npm run build && npm run unit && npm run smoke"
   },
   "engines": {
     "node": ">=20"

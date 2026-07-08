@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # build is the type gate (full tsc); test = build + unit + smoke.
+      # smoke runs without a live purplemux: it asserts the MCP handshake,
+      # instructions, and the 23-tool list; live tool calls may be isError.
+      # e2e needs a running purplemux and stays local-only.
+      - run: npm test
