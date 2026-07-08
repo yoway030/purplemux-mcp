@@ -8,7 +8,7 @@ import { callApi, type RawResult } from "./http.js";
 import { ToolError } from "./errors.js";
 import { resolvePort, resolveToken, isValidPort } from "./config.js";
 import * as S from "./schemas.js";
-import { registerAgentTools } from "./agents.js";
+import { registerAgentTools } from "./agents/index.js";
 import { ORCHESTRATION_GUIDE } from "./guide.js";
 import { guard, jsonResult, textResult } from "./tool-result.js";
 
