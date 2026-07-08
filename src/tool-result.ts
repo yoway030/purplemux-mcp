@@ -15,7 +15,7 @@ export function textResult(text: string): CallToolResult {
 }
 
 /** Structured tool-error result surfaced to the model (isError:true). */
-export function errorResult(err: unknown): CallToolResult {
+function errorResult(err: unknown): CallToolResult {
   if (err instanceof ToolError) {
     const payload = { message: err.message, ...err.details };
     return {

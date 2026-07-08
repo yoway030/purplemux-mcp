@@ -23,6 +23,8 @@ const rpc = (id, method, params) => new Promise((res) => { pending.set(id, res);
 
 // Handshake/tool-list failures must fail the run (CI gate); the live
 // pmux_list_workspaces call is allowed to be isError (no purplemux needed).
+// EXPECTED_TOOL_COUNT is a deliberate gate: adding/removing a tool MUST
+// touch this number so the change is a conscious decision, not drift.
 const EXPECTED_TOOL_COUNT = 23;
 let failed = false;
 const expect = (cond, msg) => {

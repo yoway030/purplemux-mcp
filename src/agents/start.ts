@@ -97,7 +97,7 @@ async function wireHooksAndBoot(
   };
 }
 
-function looksShellReady(pane: string): boolean {
+export function looksShellReady(pane: string): boolean {
   const lines = pane
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
@@ -131,7 +131,7 @@ async function waitForShellReady(o: {
   return { ready: false, pane: lastPane };
 }
 
-function recommendedFileOutput(args: AgentStartArgs): boolean {
+export function recommendedFileOutput(args: AgentStartArgs): boolean {
   if (args.provider === "codex") {
     return (args.sandbox ?? "read-only") !== "read-only";
   }

@@ -104,3 +104,20 @@
 - 각 phase 후: `npm run build && npm run typecheck && npm run unit && npm run smoke`(23툴).
 - P3 후: 라이브 e2e 12케이스 + pmux_agent_start→wait_ready→turn 1회 실기동(가능하면).
 - 최종: git diff가 "이동+import 변경"임을 리뷰로 확인 (로직 diff 최소).
+
+## 결과 (2026-07-08, 전 phase 완료 + codex/claude 최종 리뷰 합의)
+
+- P1~P5 전부 이행. 커밋: P1/P2 → P3 → P4 → P5+사다리주석 → 리뷰반영.
+- **동작 불변 byte 수준 검증**(claude 반박 리뷰): 전 함수 본문 재구성 diff 결과
+  승인된 4개 지점(핸들러 리프트 3건 + compileAllPatterns 치환) 외 byte-identical.
+  등록 순서·description 문자열·기본값·컴파일 순서·러너 격리 모두 반증 실패 → 합의.
+  codex 리뷰도 BEHAVIOR PRESERVATION / TEST INTEGRITY 합의.
+- **실기동 검증**: 라이브 e2e 33/33, 새 dist로 codex start→wait_ready{bootId,
+  expectEcho}→agent_ready(fileSeen+echoSeen)→turn 1 complete→close_tab ✓.
+- **리뷰 지적 반영**: prepack 추가(npm pack 시 stale dist 차단, codex SHOULD),
+  agents 순수 헬퍼 unit 테스트 13건 신설(test/unit/agents.test.mjs — 계획 필수
+  항목 이행, claude SHOULD; recommendedFileOutput/looksShellReady export 포함),
+  errorResult 비공개화(양측 NIT), smoke 툴 수 상수의 의도적 게이트 성격 주석화.
+- 최종 게이트: unit 135개(기존 122 + 신규 13) · smoke 23툴 단언 · build/typecheck 통과.
+- 수치 변화: src 최대 파일 1729줄(agents.ts) → 477줄(agents/turn.ts),
+  test 최대 1487줄(unit.mjs) → 917줄(unit/pane.test.mjs), 복붙 헬퍼 0, CI 신설.

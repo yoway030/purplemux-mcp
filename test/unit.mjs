@@ -13,6 +13,7 @@ const testFiles = [
   "./unit/profiles.test.mjs",
   "./unit/pane.test.mjs",
   "./unit/paths.test.mjs",
+  "./unit/agents.test.mjs",
   "./unit/boot.test.mjs",
   "./unit/guide.test.mjs",
 ];
