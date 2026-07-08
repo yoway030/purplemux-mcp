@@ -155,7 +155,9 @@ async function runBootSettingsTests() {
       assertEqual(r.appHooksWired, false);
     });
   } finally {
-    process.env.HOME = realHome;
+    // HOME이 원래 미설정이었다면 문자열 "undefined" 대입이 아니라 삭제로 복원
+    if (realHome === undefined) delete process.env.HOME;
+    else process.env.HOME = realHome;
     await rm(fakeHome, { recursive: true, force: true });
   }
 }

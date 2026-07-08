@@ -71,38 +71,43 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
     const status = await tabStatus(args.workspaceId, args.tabId);
     lastRawCliState = status.rawCliState;
     lastCommand = status.command;
-    if (bootFile !== undefined && !fileSeen) fileSeen = bootFileSeen(args.bootId as string);
-    if (!status.alive) {
+    // Terminal response builder for THIS iteration (R2-D4). tail is computed
+    // at call time from lastPane so the exited branch — which fires BEFORE
+    // polls increments and the pane recapture — keeps its original
+    // stale-tail / pre-increment semantics. reason stays right after state
+    // (JSON.stringify insertion order) and is omitted when undefined,
+    // exactly like the former literals. The terminal timeout return below
+    // the loop has a different key set (baseline/transitionSeen/last*) and
+    // is intentionally NOT built by emit.
+    const emit = (
+      state: string,
+      signalSource: "cliState" | "pane",
+      reason?: string,
+    ) => {
       const tail = tailLines(lastPane, TAIL_LINES);
       return jsonResult({
-        state: "exited",
+        state,
+        ...(reason !== undefined ? { reason } : {}),
         elapsedMs: Date.now() - started,
         polls,
-        signalSource: "cliState",
+        signalSource,
         rawCliState: status.rawCliState,
         command: status.command,
         runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
         ...bootInfo(),
         tail,
       });
+    };
+    if (bootFile !== undefined && !fileSeen) fileSeen = bootFileSeen(args.bootId as string);
+    if (!status.alive) {
+      return emit("exited", "cliState");
     }
 
     lastPane = await capturePane(args.workspaceId, args.tabId);
     polls += 1;
-    const tail = tailLines(lastPane, TAIL_LINES);
 
     if (isShellCommand(status.command)) {
-      return jsonResult({
-        state: "launch_failed",
-        elapsedMs: Date.now() - started,
-        polls,
-        signalSource: "cliState",
-        rawCliState: status.rawCliState,
-        command: status.command,
-        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-        ...bootInfo(),
-        tail,
-      });
+      return emit("launch_failed", "cliState");
     }
 
     if (expectEcho && !echoSeen && args.bootId !== undefined) {
@@ -117,18 +122,7 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
         // diagnosis reads "echo arrived but reported blocked", not
         // "echo never arrived" (codex 리뷰 NIT).
         echoSeen = true;
-        return jsonResult({
-          state: "agent_blocked",
-          reason: "bootstrap_echo_blocked",
-          elapsedMs: Date.now() - started,
-          polls,
-          signalSource: "pane",
-          rawCliState: status.rawCliState,
-          command: status.command,
-          runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-          ...bootInfo(),
-          tail,
-        });
+        return emit("agent_blocked", "pane", "bootstrap_echo_blocked");
       }
       if (echo.found) {
         // Completion evidence — supersedes ready-pattern heuristics,
@@ -136,18 +130,7 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
         // (which is still reported alongside), same precedence the turn
         // tool already uses (합의 항목 2).
         echoSeen = true;
-        return jsonResult({
-          state: "agent_ready",
-          reason: "bootstrap_echo",
-          elapsedMs: Date.now() - started,
-          polls,
-          signalSource: "pane",
-          rawCliState: status.rawCliState,
-          command: status.command,
-          runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-          ...bootInfo(),
-          tail,
-        });
+        return emit("agent_ready", "pane", "bootstrap_echo");
       }
     }
 
@@ -166,29 +149,9 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
       transitionSeen = true;
       lastSignalSource = "cliState";
     } else if (native === "agent_blocked") {
-      return jsonResult({
-        state: "agent_blocked",
-        elapsedMs: Date.now() - started,
-        polls,
-        signalSource: "cliState",
-        rawCliState: status.rawCliState,
-        command: status.command,
-        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-        ...bootInfo(),
-        tail,
-      });
+      return emit("agent_blocked", "cliState");
     } else if (native === "launch_failed") {
-      return jsonResult({
-        state: "launch_failed",
-        elapsedMs: Date.now() - started,
-        polls,
-        signalSource: "cliState",
-        rawCliState: status.rawCliState,
-        command: status.command,
-        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-        ...bootInfo(),
-        tail,
-      });
+      return emit("launch_failed", "cliState");
     } else if (native === "agent_ready") {
       if (
         requireBusyTransition &&
@@ -198,17 +161,7 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
         transitionSeen = true;
       }
       if (!requireBusyTransition || transitionSeen) {
-        return jsonResult({
-          state: "agent_ready",
-          elapsedMs: Date.now() - started,
-          polls,
-          signalSource: "cliState",
-          rawCliState: status.rawCliState,
-          command: status.command,
-          runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-          ...bootInfo(),
-          tail,
-        });
+        return emit("agent_ready", "cliState");
       }
     }
     if (
@@ -264,34 +217,13 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
         await sleep(Math.min(pollMs, remaining));
         continue;
       }
-      return jsonResult({
-        state: "agent_ready",
-        elapsedMs: Date.now() - started,
-        polls,
-        signalSource: "pane",
-        rawCliState: status.rawCliState,
-        command: status.command,
-        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-        ...bootInfo(),
-        tail,
-      });
+      return emit("agent_ready", "pane");
     }
     if (classifiedState === "agent_blocked") {
       // pane-side approval-dialog detection (claude plan/permission
       // prompts) — parallel to the native agent_blocked branch, needed
       // since claude ready-for-review no longer maps to blocked.
-      return jsonResult({
-        state: "agent_blocked",
-        reason: classified.reason,
-        elapsedMs: Date.now() - started,
-        polls,
-        signalSource: "pane",
-        rawCliState: status.rawCliState,
-        command: status.command,
-        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-        ...bootInfo(),
-        tail,
-      });
+      return emit("agent_blocked", "pane", classified.reason);
     }
     // READINESS LADDER (wait-ready variant) — one of three deliberately
     // DIFFERENT ladders; do not unify without a behavior review (worklog
@@ -308,31 +240,10 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
       // Under expectEcho the queued composer content is (or contains)
       // our own bootstrap prompt awaiting auto-submit — promoting it to
       // ready would defeat the echo gate, so the promotion is disabled.
-      return jsonResult({
-        state: "agent_ready",
-        reason: "composer_placeholder_assumed",
-        elapsedMs: Date.now() - started,
-        polls,
-        signalSource: "pane",
-        rawCliState: status.rawCliState,
-        command: status.command,
-        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-        ...bootInfo(),
-        tail,
-      });
+      return emit("agent_ready", "pane", "composer_placeholder_assumed");
     }
     if (classifiedState === "launch_failed") {
-      return jsonResult({
-        state: "launch_failed",
-        elapsedMs: Date.now() - started,
-        polls,
-        signalSource: "pane",
-        rawCliState: status.rawCliState,
-        command: status.command,
-        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-        ...bootInfo(),
-        tail,
-      });
+      return emit("launch_failed", "pane");
     }
     lastSignalSource = "pane";
     if (classifiedState === "agent_busy") {

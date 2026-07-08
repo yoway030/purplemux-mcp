@@ -68,47 +68,37 @@ export async function sendAgentPrompt(args: AgentSendArgs): Promise<AgentSendVal
   let validationWarning: string | undefined;
   let readinessState: string | undefined = native ?? undefined;
   let readinessReason: string | undefined;
-  if (native === "launch_failed") {
-    return withRuntimeError(
+  // Standard sent:false builder (R2-D4): every failure branch below shares
+  // this shape; extra carries branch-specific readinessState/readinessReason
+  // (absent keys stay absent — emitted JSON is unchanged). signalSource is
+  // read at call time (it flips to "pane" in the classify path). The two
+  // earlier failure returns (!alive and isShellCommand) stay hand-written:
+  // they fire before signalSource exists and use literal "cliState".
+  const fail = (
+    reason: Extract<AgentSendValue, { sent: false }>["reason"],
+    extra: { readinessState?: string; readinessReason?: string } = {},
+  ) =>
+    withRuntimeError(
       {
         sent: false,
-        reason: "launch_failed",
+        reason,
         signalSource,
         rawCliState: status.rawCliState,
         command: status.command,
         tail,
+        ...extra,
       },
       tail,
       runtimeErrorPattern,
     );
+  if (native === "launch_failed") {
+    return fail("launch_failed");
   }
   if (native === "agent_busy") {
-    return withRuntimeError(
-      {
-        sent: false,
-        reason: "busy",
-        signalSource,
-        rawCliState: status.rawCliState,
-        command: status.command,
-        tail,
-      },
-      tail,
-      runtimeErrorPattern,
-    );
+    return fail("busy");
   }
   if (native === "agent_blocked") {
-    return withRuntimeError(
-      {
-        sent: false,
-        reason: "blocked",
-        signalSource,
-        rawCliState: status.rawCliState,
-        command: status.command,
-        tail,
-      },
-      tail,
-      runtimeErrorPattern,
-    );
+    return fail("blocked");
   }
 
   if (native !== "agent_ready") {
@@ -124,47 +114,13 @@ export async function sendAgentPrompt(args: AgentSendArgs): Promise<AgentSendVal
     readinessState = classified.state;
     readinessReason = classified.reason;
     if (classified.state === "launch_failed") {
-      return withRuntimeError(
-        {
-          sent: false,
-          reason: "launch_failed",
-          signalSource,
-          rawCliState: status.rawCliState,
-          command: status.command,
-          tail,
-          readinessState: "agent_busy",
-        },
-        tail,
-        runtimeErrorPattern,
-      );
+      return fail("launch_failed", { readinessState: "agent_busy" });
     }
     if (classified.state === "agent_busy") {
-      return withRuntimeError(
-        {
-          sent: false,
-          reason: "busy",
-          signalSource,
-          rawCliState: status.rawCliState,
-          command: status.command,
-          tail,
-        },
-        tail,
-        runtimeErrorPattern,
-      );
+      return fail("busy");
     }
     if ((classified.state as string) === "agent_blocked") {
-      return withRuntimeError(
-        {
-          sent: false,
-          reason: "blocked",
-          signalSource,
-          rawCliState: status.rawCliState,
-          command: status.command,
-          tail,
-        },
-        tail,
-        runtimeErrorPattern,
-      );
+      return fail("blocked");
     }
     // READINESS LADDER (send variant) — one of three deliberately DIFFERENT
     // ladders; do not unify without a behavior review (worklog
@@ -182,20 +138,7 @@ export async function sendAgentPrompt(args: AgentSendArgs): Promise<AgentSendVal
     }
   }
   if (!args.skipReadyCheck && !ready) {
-    return withRuntimeError(
-      {
-        sent: false,
-        reason: "not_ready",
-        signalSource,
-        rawCliState: status.rawCliState,
-        command: status.command,
-        tail,
-        readinessState,
-        readinessReason,
-      },
-      tail,
-      runtimeErrorPattern,
-    );
+    return fail("not_ready", { readinessState, readinessReason });
   }
   if (
     args.expectPrevTurnEnd !== undefined &&
@@ -206,18 +149,7 @@ export async function sendAgentPrompt(args: AgentSendArgs): Promise<AgentSendVal
       requestId: args.expectPrevRequestId,
     })
   ) {
-    return withRuntimeError(
-      {
-        sent: false,
-        reason: "missing_prev_turn_end",
-        signalSource,
-        rawCliState: status.rawCliState,
-        command: status.command,
-        tail,
-      },
-      tail,
-      runtimeErrorPattern,
-    );
+    return fail("missing_prev_turn_end");
   }
 
   const fileOutput = args.fileOutput ?? true;
