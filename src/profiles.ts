@@ -44,7 +44,7 @@ export interface AgentCommandOpts {
  */
 export function buildAgentCommand(
   opts: AgentCommandOpts,
-): { command: string; bootstrapHint?: string } {
+): { command: string } {
   const { provider, model, effort, sandbox, permissionMode } = opts;
 
   if (model !== undefined && !MODEL_RE.test(model)) {
@@ -52,16 +52,16 @@ export function buildAgentCommand(
       `Invalid model "${model}": must match ${MODEL_RE.source}.`,
     );
   }
+  if (effort !== undefined && !EFFORT_VALUES.includes(effort)) {
+    throw new ToolError(
+      `Invalid effort "${effort}": must be one of ${EFFORT_VALUES.join("|")}.`,
+    );
+  }
 
   if (provider === "codex") {
     if (sandbox !== undefined && !SANDBOX_VALUES.includes(sandbox)) {
       throw new ToolError(
         `Invalid sandbox "${sandbox}": must be one of ${SANDBOX_VALUES.join("|")}.`,
-      );
-    }
-    if (effort !== undefined && !EFFORT_VALUES.includes(effort)) {
-      throw new ToolError(
-        `Invalid effort "${effort}": must be one of ${EFFORT_VALUES.join("|")}.`,
       );
     }
     const parts = ["codex", "--no-alt-screen", "-s", sandbox ?? "read-only"];
@@ -82,13 +82,11 @@ export function buildAgentCommand(
   const parts = ["claude"];
   if (model !== undefined) parts.push("--model", model);
   parts.push("--permission-mode", permissionMode ?? "plan");
-  // claude CLI has no --effort flag (design §2.1) — surface it as a bootstrap
-  // prompt hint instead of silently dropping it.
-  const bootstrapHint =
-    effort !== undefined
-      ? `Note: claude CLI has no reasoning-effort flag. Please operate at "${effort}" effort for this session.`
-      : undefined;
-  return { command: parts.join(" "), bootstrapHint };
+  // claude >=2.1.202 has a real --effort flag (low|medium|high|xhigh|max, 실측
+  // 2026-07-08) — pass it through instead of the old bootstrapHint workaround.
+  // Our enum is the CLI's subset minus "max", so every accepted value is valid.
+  if (effort !== undefined) parts.push("--effort", effort);
+  return { command: parts.join(" ") };
 }
 
 const CODEX_READY_RE = /›/;
@@ -105,8 +103,14 @@ const CLAUDE_ERROR_RE = /command not found|unexpected argument/i;
 // former can appear in ordinary response prose ("the script is working"),
 // and the latter in unrelated Unicode content; requiring status-bar-style
 // adjacency keeps the busy signal tied to an actual spinner context.
+// The last alternative covers claude 2.1.x spinner lines, which use a random
+// gerund instead of "Working" and no "esc to interrupt" (실측 2026-07-08:
+// "✻ Booping… (5m 12s · ↓ 15.2k tokens)" was classified not-busy, so
+// pmux_agent_capture returned "missing" mid-turn). Requires spinner glyph +
+// word + ellipsis + "(" adjacency, which excludes the completion line the
+// same TUI prints afterwards ("✻ Brewed for 27s" — no ellipsis/paren).
 const BUSY_RE =
-  /esc to interrupt|\bworking\b\s*(?:\.{3}|…|\(|[⠀-⣿])|[⠀-⣿]\s*\bworking\b/i;
+  /esc to interrupt|\bworking\b\s*(?:\.{3}|…|\(|[⠀-⣿])|[⠀-⣿]\s*\bworking\b|[✢✻✽✶✳✴✵✷✸✹✺✦✧·]\s*[A-Za-z]+(?:…|\.{3})\s*\(/i;
 
 export function defaultReadyPattern(p: Provider): RegExp {
   return p === "codex" ? CODEX_READY_RE : CLAUDE_READY_RE;
@@ -159,9 +163,16 @@ export function mapCliState(
     case "needs-input":
       return "agent_ready";
     case "ready-for-review":
-      // codex: turn-completion vocabulary → ready. claude: plan-approval
-      // wait → blocked (design R0.1b, provider-specific — no blanket mapping).
-      return provider === "codex" ? "agent_ready" : "agent_blocked";
+      // codex: turn-completion vocabulary → ready. claude: AMBIGUOUS — the
+      // original R0.1b mapping (plan-approval wait → blocked) turned out to
+      // be wrong in practice: claude in acceptEdits mode ALSO reports
+      // ready-for-review after a perfectly normal completed turn (실측
+      // 2026-07-08), and the blanket agent_blocked mapping permanently
+      // blocked every subsequent send (blocked has no skipReadyCheck
+      // bypass). Degrade to null so the pane heuristic decides — a real
+      // plan-approval dialog is caught there by the claude approval-dialog
+      // signature in classifyReadiness; an idle bare composer reads ready.
+      return provider === "codex" ? "agent_ready" : null;
     default:
       return null;
   }

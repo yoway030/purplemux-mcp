@@ -124,7 +124,10 @@ export async function readReportFile(
 // Common split point for both markers in the footer text below — never a
 // hand-typed literal fragment past this point; both `rest` values are
 // sliced off the single-source marker strings (eofMarker / makeDoneMarker).
-const MARKER_PREFIX = "<<<PMUX_";
+// Exported for boot.ts, whose bootstrap-echo prompt uses the same
+// split-string trick so the prompt (and its command-line echo) never
+// contains a complete marker substring.
+export const MARKER_PREFIX = "<<<PMUX_";
 
 /**
  * Build the fileOutput=true footer (design v2 §3.4). Split into fragments

@@ -198,7 +198,7 @@ export const agentStartShape = {
     ),
   effort: effortEnum
     .optional()
-    .describe("Optional reasoning effort. For claude this is returned as bootstrapHint, not a CLI flag."),
+    .describe("Optional reasoning effort. codex: -c model_reasoning_effort=<v>; claude: --effort <v> (claude >=2.1.202)."),
   sandbox: sandboxEnum
     .optional()
     .describe("Codex-only sandbox. Defaults to read-only in the command profile."),
@@ -212,6 +212,12 @@ export const agentStartShape = {
     .max(30000)
     .optional()
     .describe("How long pmux_agent_start waits for the new terminal shell prompt before returning not_shell_ready. Defaults to 5000; max 30000."),
+  bootstrapEcho: z
+    .boolean()
+    .optional()
+    .describe(
+      "Defaults to true. Appends a fixed single-line initial prompt (positional arg, auto-submitted by both CLIs) asking the agent to print the bootstrap DONE marker, so pmux_agent_wait_ready with {bootId, expectEcho:true} can verify the LLM actually responds — evidence-based boot readiness. Costs one tiny model turn; set false to skip.",
+    ),
 } as const;
 
 export const agentWaitReadyShape = {
@@ -224,7 +230,7 @@ export const agentWaitReadyShape = {
     .min(1)
     .max(180000)
     .optional()
-    .describe("Total polling timeout in ms. Defaults to 30000; max 180000."),
+    .describe("Total polling timeout in ms. Defaults to 30000 (90000 when expectEcho is true); max 180000."),
   pollMs: z
     .number()
     .int()
@@ -238,7 +244,16 @@ export const agentWaitReadyShape = {
   requireBusyTransition: z
     .boolean()
     .optional()
-    .describe("Defaults false for boot readiness. Set true when waiting after send; ready is returned only after a busy state has been observed."),
+    .describe("Defaults false for boot readiness. Set true when waiting after send; ready is returned only after a busy state has been observed. Superseded by expectEcho (the DONE marker is itself completion evidence)."),
+  bootId: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/)
+    .optional()
+    .describe("bootId returned by pmux_agent_start. When set, every response includes boot.fileSeen (SessionStart boot-signal file existence — diagnostic only, never gates readiness)."),
+  expectEcho: z
+    .boolean()
+    .optional()
+    .describe("Requires bootId, and is only meaningful when the agent was STARTED with bootstrapEcho:true (the default) — with bootstrapEcho:false no echo will ever arrive and this would time out. When true, agent_ready is returned ONLY once the bootstrap-echo DONE marker (req=bootId) is on the pane — evidence-based boot readiness that supersedes ready-pattern heuristics and requireBusyTransition."),
 } as const;
 
 export const agentSendShape = {

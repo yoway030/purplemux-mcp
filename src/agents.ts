@@ -34,6 +34,18 @@ import {
   makeFileFooter,
   readReportFile,
 } from "./paths.js";
+import {
+  BOOTSTRAP_ECHO_AGENT_ID,
+  BOOTSTRAP_ECHO_TURN,
+  bootFilePath,
+  bootFileSeen,
+  buildBootstrapEchoPrompt,
+  codexHookConfigs,
+  ensureBootHookScript,
+  pruneBootArtifacts,
+  writeClaudeBootSettings,
+  type SettingsMerge,
+} from "./boot.js";
 
 type AgentStartArgs = {
   workspaceId: string;
@@ -44,6 +56,7 @@ type AgentStartArgs = {
   sandbox?: "read-only" | "workspace-write";
   permissionMode?: "plan" | "manual" | "acceptEdits" | "dontAsk" | "auto";
   shellTimeoutMs?: number;
+  bootstrapEcho?: boolean;
 };
 
 type AgentWaitReadyArgs = {
@@ -57,6 +70,8 @@ type AgentWaitReadyArgs = {
   busyPattern?: string;
   runtimeErrorPattern?: string;
   requireBusyTransition?: boolean;
+  bootId?: string;
+  expectEcho?: boolean;
 };
 
 type AgentSendArgs = {
@@ -319,41 +334,76 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function appendHookArgs(args: AgentStartArgs, command: string): {
+/**
+ * Wire app hooks AND the boot-signal SessionStart hook (design 2026-07-08).
+ * `hooksWired` keeps its original meaning (purplemux app status hooks);
+ * `bootWired` reports the boot-signal wiring separately. Boot wiring
+ * degrades gracefully: any fs failure falls back to the legacy app-hook-only
+ * command with bootWired:false rather than failing the start. NOTE (codex
+ * hook trust): a wired-but-never-seen boot file can be a NORMAL state if the
+ * CLI's hook trust layer holds the new script — fileSeen is diagnostic only.
+ */
+async function wireHooksAndBoot(
+  args: AgentStartArgs,
+  command: string,
+  bootId: string,
+): Promise<{
   command: string;
   hooksWired: boolean;
-} {
+  bootWired: boolean;
+  settingsMerge?: SettingsMerge;
+}> {
   const home = homedir();
+  let bootHookPath: string | undefined;
+  try {
+    bootHookPath = await ensureBootHookScript();
+  } catch {
+    bootHookPath = undefined;
+  }
+
   if (args.provider === "claude") {
+    if (bootHookPath !== undefined) {
+      try {
+        const s = await writeClaudeBootSettings(bootId, bootHookPath);
+        return {
+          command: `${command} --settings ${shellQuote(s.path)}`,
+          hooksWired: s.appHooksWired,
+          bootWired: true,
+          settingsMerge: s.settingsMerge,
+        };
+      } catch {
+        // fall through to legacy app-hook-only wiring
+      }
+    }
     const settingsPath = `${home}/.purplemux/hooks.json`;
     if (!existsSync(settingsPath)) {
-      return { command, hooksWired: false };
+      return { command, hooksWired: false, bootWired: false };
     }
     return {
       command: `${command} --settings ${shellQuote(settingsPath)}`,
       hooksWired: true,
+      bootWired: false,
     };
   }
 
-  const hookPath = `${home}/.purplemux/codex-hook.sh`;
-  if (!existsSync(hookPath)) {
-    return { command, hooksWired: false };
+  const appHook = `${home}/.purplemux/codex-hook.sh`;
+  const appHookPath = existsSync(appHook) ? appHook : undefined;
+  let configs: string[];
+  try {
+    configs = codexHookConfigs({ appHookPath, bootHookPath });
+  } catch {
+    // unsafe hook path (allowlist violation) — degrade instead of
+    // assembling a shell-expandable hook command.
+    return { command, hooksWired: false, bootWired: false };
   }
-  const events = [
-    "SessionStart",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PostToolUse",
-    "Stop",
-    "PermissionRequest",
-  ];
-  const hookArgs = events.map((event) => {
-    const config = `hooks.${event}=[{matcher=".*",hooks=[{type="command",command="${hookPath}"}]}]`;
-    return `-c ${shellQuote(config)}`;
-  });
+  if (configs.length === 0) {
+    return { command, hooksWired: false, bootWired: false };
+  }
+  const hookArgs = configs.map((config) => `-c ${shellQuote(config)}`);
   return {
     command: `${command} ${hookArgs.join(" ")}`,
-    hooksWired: true,
+    hooksWired: appHookPath !== undefined,
+    bootWired: bootHookPath !== undefined,
   };
 }
 
@@ -1090,15 +1140,40 @@ export function registerAgentTools(server: McpServer): void {
     "pmux_agent_start",
     {
       description:
-        "Primary agent orchestration tool: create a terminal tab, poll briefly for shell readiness, then send an interactive agent CLI command. Use pmux_send_input/pmux_capture_pane only as low-level fallbacks. Returns recommendedFileOutput: false for read-only/plan agents that should be sent fileOutput:false. This is non-blocking: after a successful start return, use pmux_agent_wait_ready before sending work. wait_ready launch_failed is meaningful only after start has successfully sent the command; an idle shell before command send is indistinguishable to the stateless wait tool. Session lifetime contract: keep the tab open until the task is finished, then close it with pmux_close_tab. Codex command: codex --no-alt-screen -s <sandbox>; Claude permissionMode choices are based on claude 2.1.201 and intentionally exclude bypassPermissions.",
+        "Primary agent orchestration tool: create a terminal tab, poll briefly for shell readiness, then send an interactive agent CLI command. ORCHESTRATOR CONTRACT: before launching, ask the user which model/effort (and codex sandbox / claude permissionMode) each subagent should use, unless the user already specified them. Use pmux_send_input/pmux_capture_pane only as low-level fallbacks. Returns recommendedFileOutput: false for read-only/plan agents that should be sent fileOutput:false. Boot verification: returns bootId — by default (bootstrapEcho:true) the CLI is launched with a fixed initial prompt that makes the model print a DONE marker (req=bootId), and a SessionStart hook writes a boot-signal file; verify with pmux_agent_wait_ready {bootId, expectEcho:true}, then send user work from turn=1 (bootstrap consumed turn 0; do not pass expectPrevTurnEnd on turn 1). bootstrapEcho costs one tiny model turn — pass false to skip. codex hook trust (실측 2026-07-08): the FIRST launch that wires the boot hook requires a one-time interactive trust approval in the codex TUI — until approved, boot.fileSeen stays false while the echo still works; treat fileSeen:false + echoSeen:true on codex as this case, not a failure. This is non-blocking: after a successful start return, use pmux_agent_wait_ready before sending work. wait_ready launch_failed is meaningful only after start has successfully sent the command; an idle shell before command send is indistinguishable to the stateless wait tool. Session lifetime contract: keep the tab open until the task is finished, then close it with pmux_close_tab. Codex command: codex --no-alt-screen -s <sandbox>; Claude permissionMode choices are based on claude 2.1.201 and intentionally exclude bypassPermissions; claude effort maps to the --effort flag (claude >=2.1.202).",
       inputSchema: S.agentStartShape,
     },
     guard(async (args: AgentStartArgs) => {
       validateModel(args.model);
       const base = buildAgentCommand(args);
-      const { command, hooksWired } = appendHookArgs(args, base.command);
-      const { bootstrapHint } = base;
+      const bootId = generateRequestId();
+      const bootFile = bootFilePath(bootId);
+      const wired = await wireHooksAndBoot(args, base.command, bootId);
+      const bootstrapEcho = args.bootstrapEcho ?? true;
+      // `env VAR=… cmd` (not the bare VAR=… prefix) so fish shells work too.
+      let command = wired.bootWired
+        ? `env PMUX_BOOT_FILE=${shellQuote(bootFile)} ${wired.command}`
+        : wired.command;
+      if (bootstrapEcho) {
+        // Positional initial prompt LAST, after every flag (auto-submitted
+        // by both CLIs — 실측 2026-07-08). Fixed template; only the hex
+        // bootId is interpolated, so the §4.6 allowlist invariant holds.
+        command = `${command} ${shellQuote(buildBootstrapEchoPrompt(bootId))}`;
+      }
+      await pruneBootArtifacts(bootId);
       const fileOutputHint = recommendedFileOutput(args);
+      const next = bootstrapEcho
+        ? "pmux_agent_wait_ready에 bootId와 expectEcho:true를 전달해 echo 완료를 확인한 뒤 turn=1부터 작업 전송 (bootstrap이 turn 0을 소비하므로 사용자 턴은 1부터, turn 1에는 expectPrevTurnEnd를 주지 말 것)"
+        : "pmux_agent_wait_ready(bootId 전달 권장) 후 pmux_agent_send 또는 pmux_agent_turn";
+      const bootFields = {
+        bootId,
+        bootFile,
+        bootWired: wired.bootWired,
+        ...(wired.settingsMerge !== undefined
+          ? { settingsMerge: wired.settingsMerge }
+          : {}),
+        bootstrapEcho,
+      };
       // command is safe to return because all assembled inputs are allowlisted.
       // If future free-form command args are added, redact here before returning.
       const created = await callApi<TabCreateResult>("POST", "/api/cli/tabs", {
@@ -1121,10 +1196,10 @@ export function registerAgentTools(server: McpServer): void {
           sessionName: sessionName(created, tabId),
           command,
           provider: args.provider,
-          hooksWired,
+          hooksWired: wired.hooksWired,
+          ...bootFields,
           recommendedFileOutput: fileOutputHint,
-          bootstrapHint,
-          next: "pmux_agent_wait_ready 후 pmux_agent_send 또는 pmux_agent_turn",
+          next,
           fallback: "wait_ready timeout이나 판정 불확실 시 pmux_capture_pane으로 직접 확인",
           tail: tailLines(shell.pane, 15),
         });
@@ -1138,10 +1213,10 @@ export function registerAgentTools(server: McpServer): void {
         sessionName: sessionName(created, tabId),
         command,
         provider: args.provider,
-        hooksWired,
+        hooksWired: wired.hooksWired,
+        ...bootFields,
         recommendedFileOutput: fileOutputHint,
-        bootstrapHint,
-        next: "pmux_agent_wait_ready 후 pmux_agent_send 또는 pmux_agent_turn",
+        next,
         fallback: "wait_ready timeout이나 판정 불확실 시 pmux_capture_pane으로 직접 확인",
       });
     }),
@@ -1151,14 +1226,40 @@ export function registerAgentTools(server: McpServer): void {
     "pmux_agent_wait_ready",
     {
       description:
-        "Primary agent orchestration tool: poll a tab until an agent is ready, still starting/busy, launch_failed, exited, or timeout. Use pmux_send_input/pmux_capture_pane only as low-level fallbacks. agent_busy is non-terminal and keeps polling. requireBusyTransition defaults false for boot readiness; set true when waiting after send so ready is returned only after busy was observed or an initial non-ready baseline later changes to ready. In boot mode only, pane fallback input_queued can be treated as a composer placeholder and returned ready; send validation remains strict. Uses pane capture + tab_status only; no server-side registry is kept. Session lifetime contract: keep the tab open until the task is finished, then close it with pmux_close_tab.",
+        "Primary agent orchestration tool: poll a tab until an agent is ready, still starting/busy, launch_failed, exited, or timeout. Use pmux_send_input/pmux_capture_pane only as low-level fallbacks. agent_busy is non-terminal and keeps polling. Boot verification (recommended after pmux_agent_start): pass {bootId, expectEcho:true} — agent_ready is then returned ONLY on the bootstrap DONE marker (completion evidence; supersedes ready heuristics, requireBusyTransition and runtimeError), and every response carries boot.fileSeen (SessionStart boot-signal file — diagnostic only; on echo timeout, fileSeen:false suggests launch/hook-trust failure while fileSeen:true suggests the model never answered). Default timeout rises to 90s under expectEcho. requireBusyTransition defaults false for boot readiness; set true when waiting after send so ready is returned only after busy was observed or an initial non-ready baseline later changes to ready. In boot mode only (and never under expectEcho), pane fallback input_queued can be treated as a composer placeholder and returned ready; send validation remains strict. Uses pane capture + tab_status only; no server-side registry is kept. Session lifetime contract: keep the tab open until the task is finished, then close it with pmux_close_tab.",
       inputSchema: S.agentWaitReadyShape,
     },
     guard(async (args: AgentWaitReadyArgs) => {
       const started = Date.now();
-      const timeoutMs = args.timeoutMs ?? 30_000;
+      const expectEcho = args.expectEcho ?? false;
+      if (expectEcho && args.bootId === undefined) {
+        throw new ToolError(
+          "expectEcho requires bootId (returned by pmux_agent_start).",
+        );
+      }
+      // echo completion includes a model turn — 30s is too tight for a cold
+      // boot + first inference, so the default widens (합의 항목 2).
+      const timeoutMs = args.timeoutMs ?? (expectEcho ? 90_000 : 30_000);
       const pollMs = args.pollMs ?? 1_500;
       const requireBusyTransition = args.requireBusyTransition ?? false;
+      const bootFile =
+        args.bootId !== undefined ? bootFilePath(args.bootId) : undefined;
+      let fileSeen = false;
+      let echoSeen = false;
+      // Diagnostic only — fileSeen never feeds readiness (진단 전용, 합의
+      // 항목 3). On an expectEcho timeout it gives the 2-bit diagnosis:
+      // fileSeen:false → launch/hook problem; fileSeen:true without echo →
+      // prompt not submitted / model auth / hang.
+      const bootInfo = () =>
+        args.bootId === undefined
+          ? {}
+          : {
+              boot: {
+                bootId: args.bootId,
+                fileSeen,
+                ...(expectEcho ? { echoSeen } : {}),
+              },
+            };
       const readyPattern = compileOptionalPattern(
         args.readyPattern,
         "readyPattern",
@@ -1194,6 +1295,7 @@ export function registerAgentTools(server: McpServer): void {
         const status = await tabStatus(args.workspaceId, args.tabId);
         lastRawCliState = status.rawCliState;
         lastCommand = status.command;
+        if (bootFile !== undefined && !fileSeen) fileSeen = bootFileSeen(args.bootId as string);
         if (!status.alive) {
           const tail = tailLines(lastPane, 15);
           return jsonResult({
@@ -1204,6 +1306,7 @@ export function registerAgentTools(server: McpServer): void {
             rawCliState: status.rawCliState,
             command: status.command,
             runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+            ...bootInfo(),
             tail,
           });
         }
@@ -1221,11 +1324,68 @@ export function registerAgentTools(server: McpServer): void {
             rawCliState: status.rawCliState,
             command: status.command,
             runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+            ...bootInfo(),
             tail,
           });
         }
 
-        const native = nativeCliState(args.provider, status.rawCliState);
+        if (expectEcho && !echoSeen && args.bootId !== undefined) {
+          const echo = parseDoneSignal({
+            pane: lastPane,
+            agentId: BOOTSTRAP_ECHO_AGENT_ID,
+            turn: BOOTSTRAP_ECHO_TURN,
+            requestId: args.bootId,
+          });
+          if (echo.found && echo.status === "blocked") {
+            // The marker WAS seen — reflect that in boot.echoSeen so the
+            // diagnosis reads "echo arrived but reported blocked", not
+            // "echo never arrived" (codex 리뷰 NIT).
+            echoSeen = true;
+            return jsonResult({
+              state: "agent_blocked",
+              reason: "bootstrap_echo_blocked",
+              elapsedMs: Date.now() - started,
+              polls,
+              signalSource: "pane",
+              rawCliState: status.rawCliState,
+              command: status.command,
+              runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+              ...bootInfo(),
+              tail,
+            });
+          }
+          if (echo.found) {
+            // Completion evidence — supersedes ready-pattern heuristics,
+            // requireBusyTransition bookkeeping AND a matched runtimeError
+            // (which is still reported alongside), same precedence the turn
+            // tool already uses (합의 항목 2).
+            echoSeen = true;
+            return jsonResult({
+              state: "agent_ready",
+              reason: "bootstrap_echo",
+              elapsedMs: Date.now() - started,
+              polls,
+              signalSource: "pane",
+              rawCliState: status.rawCliState,
+              command: status.command,
+              runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+              ...bootInfo(),
+              tail,
+            });
+          }
+        }
+
+        const rawNative = nativeCliState(args.provider, status.rawCliState);
+        // Single echo gate (opus 리뷰 항목 3): before the echo marker is
+        // seen, NO ready path may fire — native needs-input can be the
+        // pre-submit window right before the CLI auto-submits the
+        // bootstrap prompt (실측: that window polluted the
+        // requireBusyTransition baseline and hung it). Demote to
+        // agent_starting so every ready branch below keeps polling.
+        const native =
+          expectEcho && !echoSeen && rawNative === "agent_ready"
+            ? "agent_starting"
+            : rawNative;
         if (native === "agent_busy") {
           transitionSeen = true;
           lastSignalSource = "cliState";
@@ -1238,6 +1398,7 @@ export function registerAgentTools(server: McpServer): void {
             rawCliState: status.rawCliState,
             command: status.command,
             runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+            ...bootInfo(),
             tail,
           });
         } else if (native === "launch_failed") {
@@ -1249,6 +1410,7 @@ export function registerAgentTools(server: McpServer): void {
             rawCliState: status.rawCliState,
             command: status.command,
             runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+            ...bootInfo(),
             tail,
           });
         } else if (native === "agent_ready") {
@@ -1268,6 +1430,7 @@ export function registerAgentTools(server: McpServer): void {
               rawCliState: status.rawCliState,
               command: status.command,
               runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+              ...bootInfo(),
               tail,
             });
           }
@@ -1297,21 +1460,28 @@ export function registerAgentTools(server: McpServer): void {
           errorPattern,
           busyPattern,
         });
+        // Same echo gate as the native path — a pane-classified ready (bare
+        // composer / frame signature) before the echo marker is only the
+        // pre-submit window, not evidence.
+        const classifiedState =
+          expectEcho && !echoSeen && classified.state === "agent_ready"
+            ? "agent_starting"
+            : classified.state;
         if (baseline === undefined) {
           baseline = {
             source: "pane",
-            state: classified.state,
+            state: classifiedState,
             reason: classified.reason,
             rawCliState: status.rawCliState,
           };
         } else if (
           requireBusyTransition &&
-          classified.state === "agent_ready" &&
+          classifiedState === "agent_ready" &&
           baseline.state !== "agent_ready"
         ) {
           transitionSeen = true;
         }
-        if (classified.state === "agent_ready") {
+        if (classifiedState === "agent_ready") {
           if (requireBusyTransition && !transitionSeen) {
             const remaining = timeoutMs - (Date.now() - started);
             if (remaining <= 0) break;
@@ -1326,14 +1496,36 @@ export function registerAgentTools(server: McpServer): void {
             rawCliState: status.rawCliState,
             command: status.command,
             runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+            ...bootInfo(),
+            tail,
+          });
+        }
+        if (classifiedState === "agent_blocked") {
+          // pane-side approval-dialog detection (claude plan/permission
+          // prompts) — parallel to the native agent_blocked branch, needed
+          // since claude ready-for-review no longer maps to blocked.
+          return jsonResult({
+            state: "agent_blocked",
+            reason: classified.reason,
+            elapsedMs: Date.now() - started,
+            polls,
+            signalSource: "pane",
+            rawCliState: status.rawCliState,
+            command: status.command,
+            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+            ...bootInfo(),
             tail,
           });
         }
         if (
+          !expectEcho &&
           !requireBusyTransition &&
-          classified.state === "agent_starting" &&
+          classifiedState === "agent_starting" &&
           classified.reason === "input_queued"
         ) {
+          // Under expectEcho the queued composer content is (or contains)
+          // our own bootstrap prompt awaiting auto-submit — promoting it to
+          // ready would defeat the echo gate, so the promotion is disabled.
           return jsonResult({
             state: "agent_ready",
             reason: "composer_placeholder_assumed",
@@ -1343,10 +1535,11 @@ export function registerAgentTools(server: McpServer): void {
             rawCliState: status.rawCliState,
             command: status.command,
             runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+            ...bootInfo(),
             tail,
           });
         }
-        if (classified.state === "launch_failed") {
+        if (classifiedState === "launch_failed") {
           return jsonResult({
             state: "launch_failed",
             elapsedMs: Date.now() - started,
@@ -1355,11 +1548,12 @@ export function registerAgentTools(server: McpServer): void {
             rawCliState: status.rawCliState,
             command: status.command,
             runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+            ...bootInfo(),
             tail,
           });
         }
         lastSignalSource = "pane";
-        if (classified.state === "agent_busy") {
+        if (classifiedState === "agent_busy") {
           transitionSeen = true;
         }
         // agent_busy is a non-terminal readiness state for wait_ready.
@@ -1379,6 +1573,7 @@ export function registerAgentTools(server: McpServer): void {
         baseline,
         transitionSeen,
         runtimeError: runtimeErrorInTail(tailLines(lastPane, 15), runtimeErrorPattern),
+        ...bootInfo(),
         tail: tailLines(lastPane, 15),
       });
     }),

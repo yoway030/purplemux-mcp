@@ -271,6 +271,19 @@ function isQueuedComposer(line: string, glyph: string): boolean {
  */
 const PROTOCOL_SIGNATURE_RE = /PMUX_|응답 규약/;
 
+// claude approval-dialog signatures (plan-mode "Would you like to proceed?"
+// and permission prompts). Needed because claude's native cliState
+// "ready-for-review" was degraded to null (see mapCliState) — the pane
+// heuristic must now be the one that tells a genuine approval wait apart
+// from an idle post-turn composer. Tail-scoped like busy/ready, so a
+// response body quoting one of these phrases can linger only briefly (same
+// documented limitation as detectRuntimeError).
+// Case-insensitive + common permission-prompt variants (리뷰 NIT). Still an
+// allowlist — an unrecognized future dialog phrasing reads not-blocked, so
+// keep extending this from live captures.
+const CLAUDE_APPROVAL_DIALOG_RE =
+  /would you like to proceed\?|do you want to (?:proceed|make this edit|run this command|allow)|no, keep planning/i;
+
 function hasProtocolSignature(line: string): boolean {
   return PROTOCOL_SIGNATURE_RE.test(line);
 }
@@ -361,6 +374,10 @@ export function classifyReadiness(o: {
 
   if (busyPattern.test(tail)) {
     return { state: "agent_busy", reason: "busy pattern matched" };
+  }
+
+  if (o.provider === "claude" && CLAUDE_APPROVAL_DIALOG_RE.test(tail)) {
+    return { state: "agent_blocked", reason: "approval dialog" };
   }
 
   const glyph = composerGlyph(o.provider);
@@ -618,8 +635,15 @@ export function hasPriorTurnCompletion(o: {
 // R0/R1 state model ever notices. Override with a caller-supplied pattern
 // (<=200 chars, validated the same way as ready/error/busyPattern) for
 // other CLIs' wording.
+// Narrowed (실측 2026-07-07/08): bare `usage limit`/`rate limit` matched
+// benign informational text on BOTH providers — codex's "You have 3 usage
+// limit resets available" banner and claude's "you can use up to 50% of
+// your plan's weekly usage limit on Fable 5" promo. A limit phrase now
+// counts only next to a failure verb (reached/exceeded/hit, either order),
+// so an orchestrator that aborts on runtimeError doesn't abort on a banner.
+// Reviewed & agreed by codex/claude subagent panel (2026-07-08 합의).
 const DEFAULT_RUNTIME_ERROR_RE =
-  /API Error|Overloaded|rate limit|usage limit|stream disconnected|connection error/i;
+  /\b(?:API Error(?::\s*\d+)?|Overloaded|stream disconnected|connection (?:error|failed|lost|reset|closed|timed out)|ECONNRESET|ETIMEDOUT|too many requests|(?:rate|usage) limit (?:reached|exceeded|hit)|(?:reached|exceeded|hit) (?:the |your )?(?:rate|usage) limit)\b/i;
 
 /**
  * Detect a runtime-error signature within an ALREADY tail-scoped string
