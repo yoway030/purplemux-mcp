@@ -1,5 +1,5 @@
 import { resolveConnection, type Connection } from "./config.js";
-import { mapHttpError, mapNetworkError, ToolError } from "./errors.js";
+import { mapHttpError, mapNetworkError } from "./errors.js";
 
 export type HttpMethod = "GET" | "POST" | "DELETE";
 
@@ -107,5 +107,3 @@ export async function callApi<T = unknown>(
   // text/markdown, text/plain, or empty
   return (await res.text()) as unknown as T;
 }
-
-export { ToolError };

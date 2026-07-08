@@ -44,10 +44,6 @@ export async function tabStatus(
   };
 }
 
-async function tabAlive(workspaceId: string, tabId: string): Promise<boolean> {
-  return (await tabStatus(workspaceId, tabId)).alive;
-}
-
 export async function resolveWorkspaceDir(workspaceId: string): Promise<string> {
   const payload = await callApi<WorkspaceListResult>(
     "GET",

@@ -19,7 +19,7 @@ const ANSI_RE = new RegExp(
   "g",
 );
 
-export function stripAnsi(s: string): string {
+function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
 }
 

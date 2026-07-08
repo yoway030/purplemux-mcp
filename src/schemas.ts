@@ -13,8 +13,6 @@ export const panelTypeEnum = z.enum([
   "diff",
 ]);
 
-export type PanelType = z.infer<typeof panelTypeEnum>;
-
 const workspaceId = z
   .string()
   .min(1)

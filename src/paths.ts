@@ -13,7 +13,7 @@ import { makeDoneMarker } from "./pane.js";
  * trailing '>' where the parser expected 3, permanently blocking
  * eof_missing for any agent that followed the footer exactly).
  */
-export function eofMarker(requestId: string): string {
+function eofMarker(requestId: string): string {
   return `<<<PMUX_EOF req=${requestId}>>>`;
 }
 

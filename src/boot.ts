@@ -33,7 +33,7 @@ function purplemuxDir(): string {
   return join(homedir(), ".purplemux");
 }
 
-export function bootDir(): string {
+function bootDir(): string {
   return join(purplemuxDir(), "boot");
 }
 
@@ -44,7 +44,7 @@ export function bootFilePath(bootId: string): string {
   return join(bootDir(), bootId);
 }
 
-export const BOOT_HOOK_SCRIPT_PATH_BASENAME = "pmux-boot-hook.sh";
+const BOOT_HOOK_SCRIPT_PATH_BASENAME = "pmux-boot-hook.sh";
 
 // The script derives everything from $PMUX_BOOT_FILE (set per-launch via an
 // `env` prefix — `env` binary form so fish shells work too), so ONE static
@@ -103,7 +103,7 @@ export type SettingsMerge = "merged" | "boot_only_missing" | "boot_only_parse_fa
 // shell-expandable hook command.
 const SAFE_HOOK_PATH_RE = /^[A-Za-z0-9/._-]+$/;
 
-export function assertSafeHookPath(path: string): void {
+function assertSafeHookPath(path: string): void {
   if (!SAFE_HOOK_PATH_RE.test(path)) {
     throw new ToolError(
       `Hook path contains characters outside the safe allowlist: ${path}`,

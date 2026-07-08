@@ -2,7 +2,6 @@ import { writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { Buffer } from "node:buffer";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { callApi, type RawResult } from "./http.js";
 import { ToolError } from "./errors.js";
