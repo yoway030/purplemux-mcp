@@ -7,6 +7,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { callApi } from "./http.js";
 import { ToolError } from "./errors.js";
+import { guard, jsonResult } from "./tool-result.js";
 import * as S from "./schemas.js";
 import {
   ID_RE,
@@ -195,39 +196,6 @@ type AgentSendValue =
       readinessReason?: string;
       runtimeError?: RuntimeErrorInfo;
     };
-
-function jsonResult(value: unknown): CallToolResult {
-  return {
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
-  };
-}
-
-function errorResult(err: unknown): CallToolResult {
-  if (err instanceof ToolError) {
-    const payload = { message: err.message, ...err.details };
-    return {
-      isError: true,
-      content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-    };
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  return {
-    isError: true,
-    content: [{ type: "text", text: JSON.stringify({ message }, null, 2) }],
-  };
-}
-
-function guard<A>(
-  fn: (args: A) => Promise<CallToolResult>,
-): (args: A) => Promise<CallToolResult> {
-  return async (args: A) => {
-    try {
-      return await fn(args);
-    } catch (err) {
-      return errorResult(err);
-    }
-  };
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -514,6 +482,43 @@ function compileRuntimeErrorPattern(src: string | undefined): RegExp | undefined
     : compileUserPattern(src, "runtimeErrorPattern");
 }
 
+type CompiledPatterns = {
+  readyPattern: RegExp;
+  errorPattern: RegExp;
+  busyPattern: RegExp;
+  runtimeErrorPattern: RegExp | undefined;
+};
+
+/** Compile the four user-overridable patterns against provider defaults. */
+export function compileAllPatterns(
+  args: {
+    readyPattern?: string;
+    errorPattern?: string;
+    busyPattern?: string;
+    runtimeErrorPattern?: string;
+  },
+  provider: Provider,
+): CompiledPatterns {
+  return {
+    readyPattern: compileOptionalPattern(
+      args.readyPattern,
+      "readyPattern",
+      defaultReadyPattern(provider),
+    ),
+    errorPattern: compileOptionalPattern(
+      args.errorPattern,
+      "errorPattern",
+      defaultErrorPattern(provider),
+    ),
+    busyPattern: compileOptionalPattern(
+      args.busyPattern,
+      "busyPattern",
+      defaultBusyPattern(provider),
+    ),
+    runtimeErrorPattern: compileRuntimeErrorPattern(args.runtimeErrorPattern),
+  };
+}
+
 function generateRequestId(): string {
   return randomBytes(6).toString("hex");
 }
@@ -605,22 +610,8 @@ async function sendAgentPrompt(args: AgentSendArgs): Promise<AgentSendValue> {
   validateId(args.agentId, "agentId");
   validateId(args.requestId, "requestId");
   validateId(args.expectPrevRequestId, "expectPrevRequestId");
-  const readyPattern = compileOptionalPattern(
-    args.readyPattern,
-    "readyPattern",
-    defaultReadyPattern(args.provider),
-  );
-  const errorPattern = compileOptionalPattern(
-    args.errorPattern,
-    "errorPattern",
-    defaultErrorPattern(args.provider),
-  );
-  const busyPattern = compileOptionalPattern(
-    args.busyPattern,
-    "busyPattern",
-    defaultBusyPattern(args.provider),
-  );
-  const runtimeErrorPattern = compileRuntimeErrorPattern(args.runtimeErrorPattern);
+  const { readyPattern, errorPattern, busyPattern, runtimeErrorPattern } =
+    compileAllPatterns(args, args.provider);
   const status = await tabStatus(args.workspaceId, args.tabId);
   if (!status.alive) {
     return {
@@ -1035,22 +1026,12 @@ async function runAgentTurn(args: AgentTurnArgs): Promise<Record<string, unknown
   }
 
   const marker = sent.marker;
-  const readyPattern = compileOptionalPattern(
-    args.readyPattern,
-    "readyPattern",
-    defaultReadyPattern(args.provider),
-  );
-  const errorPattern = compileOptionalPattern(
-    args.errorPattern,
-    "errorPattern",
-    defaultErrorPattern(args.provider),
-  );
-  const busyPattern = compileOptionalPattern(
-    args.busyPattern,
-    "busyPattern",
-    defaultBusyPattern(args.provider),
-  );
-  const runtimeErrorPattern = compileRuntimeErrorPattern(args.runtimeErrorPattern);
+  // Compiled only after the send loop on purpose: an invalid user pattern
+  // already threw the identical ToolError inside sendAgentPrompt on the
+  // first loop iteration, so hoisting this earlier would not change the
+  // observable behavior — but keeping it here preserves the original flow.
+  const { readyPattern, errorPattern, busyPattern, runtimeErrorPattern } =
+    compileAllPatterns(args, args.provider);
   let attempts = 0;
   let lastTail = "";
   let lastRawCliState: string | null = sent.rawCliState;
@@ -1133,6 +1114,428 @@ async function runAgentTurn(args: AgentTurnArgs): Promise<Record<string, unknown
     command: lastCommand,
     tail: lastTail,
   };
+}
+
+async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolResult> {
+  const started = Date.now();
+  const expectEcho = args.expectEcho ?? false;
+  if (expectEcho && args.bootId === undefined) {
+    throw new ToolError(
+      "expectEcho requires bootId (returned by pmux_agent_start).",
+    );
+  }
+  // echo completion includes a model turn — 30s is too tight for a cold
+  // boot + first inference, so the default widens (합의 항목 2).
+  const timeoutMs = args.timeoutMs ?? (expectEcho ? 90_000 : 30_000);
+  const pollMs = args.pollMs ?? 1_500;
+  const requireBusyTransition = args.requireBusyTransition ?? false;
+  const bootFile =
+    args.bootId !== undefined ? bootFilePath(args.bootId) : undefined;
+  let fileSeen = false;
+  let echoSeen = false;
+  // Diagnostic only — fileSeen never feeds readiness (진단 전용, 합의
+  // 항목 3). On an expectEcho timeout it gives the 2-bit diagnosis:
+  // fileSeen:false → launch/hook problem; fileSeen:true without echo →
+  // prompt not submitted / model auth / hang.
+  const bootInfo = () =>
+    args.bootId === undefined
+      ? {}
+      : {
+          boot: {
+            bootId: args.bootId,
+            fileSeen,
+            ...(expectEcho ? { echoSeen } : {}),
+          },
+        };
+  const { readyPattern, errorPattern, busyPattern, runtimeErrorPattern } =
+    compileAllPatterns(args, args.provider);
+  let polls = 0;
+  let lastPane = "";
+  let lastRawCliState: string | null = null;
+  let lastCommand: string | null = null;
+  let lastSignalSource: "cliState" | "pane" = "pane";
+  let transitionSeen = false;
+  let baseline:
+    | {
+        source: "cliState" | "pane";
+        state: string;
+        reason?: string;
+        rawCliState: string | null;
+      }
+    | undefined;
+
+  while (Date.now() - started <= timeoutMs) {
+    const status = await tabStatus(args.workspaceId, args.tabId);
+    lastRawCliState = status.rawCliState;
+    lastCommand = status.command;
+    if (bootFile !== undefined && !fileSeen) fileSeen = bootFileSeen(args.bootId as string);
+    if (!status.alive) {
+      const tail = tailLines(lastPane, 15);
+      return jsonResult({
+        state: "exited",
+        elapsedMs: Date.now() - started,
+        polls,
+        signalSource: "cliState",
+        rawCliState: status.rawCliState,
+        command: status.command,
+        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+        ...bootInfo(),
+        tail,
+      });
+    }
+
+    lastPane = await capturePane(args.workspaceId, args.tabId);
+    polls += 1;
+    const tail = tailLines(lastPane, 15);
+
+    if (isShellCommand(status.command)) {
+      return jsonResult({
+        state: "launch_failed",
+        elapsedMs: Date.now() - started,
+        polls,
+        signalSource: "cliState",
+        rawCliState: status.rawCliState,
+        command: status.command,
+        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+        ...bootInfo(),
+        tail,
+      });
+    }
+
+    if (expectEcho && !echoSeen && args.bootId !== undefined) {
+      const echo = parseDoneSignal({
+        pane: lastPane,
+        agentId: BOOTSTRAP_ECHO_AGENT_ID,
+        turn: BOOTSTRAP_ECHO_TURN,
+        requestId: args.bootId,
+      });
+      if (echo.found && echo.status === "blocked") {
+        // The marker WAS seen — reflect that in boot.echoSeen so the
+        // diagnosis reads "echo arrived but reported blocked", not
+        // "echo never arrived" (codex 리뷰 NIT).
+        echoSeen = true;
+        return jsonResult({
+          state: "agent_blocked",
+          reason: "bootstrap_echo_blocked",
+          elapsedMs: Date.now() - started,
+          polls,
+          signalSource: "pane",
+          rawCliState: status.rawCliState,
+          command: status.command,
+          runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+          ...bootInfo(),
+          tail,
+        });
+      }
+      if (echo.found) {
+        // Completion evidence — supersedes ready-pattern heuristics,
+        // requireBusyTransition bookkeeping AND a matched runtimeError
+        // (which is still reported alongside), same precedence the turn
+        // tool already uses (합의 항목 2).
+        echoSeen = true;
+        return jsonResult({
+          state: "agent_ready",
+          reason: "bootstrap_echo",
+          elapsedMs: Date.now() - started,
+          polls,
+          signalSource: "pane",
+          rawCliState: status.rawCliState,
+          command: status.command,
+          runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+          ...bootInfo(),
+          tail,
+        });
+      }
+    }
+
+    const rawNative = nativeCliState(args.provider, status.rawCliState);
+    // Single echo gate (opus 리뷰 항목 3): before the echo marker is
+    // seen, NO ready path may fire — native needs-input can be the
+    // pre-submit window right before the CLI auto-submits the
+    // bootstrap prompt (실측: that window polluted the
+    // requireBusyTransition baseline and hung it). Demote to
+    // agent_starting so every ready branch below keeps polling.
+    const native =
+      expectEcho && !echoSeen && rawNative === "agent_ready"
+        ? "agent_starting"
+        : rawNative;
+    if (native === "agent_busy") {
+      transitionSeen = true;
+      lastSignalSource = "cliState";
+    } else if (native === "agent_blocked") {
+      return jsonResult({
+        state: "agent_blocked",
+        elapsedMs: Date.now() - started,
+        polls,
+        signalSource: "cliState",
+        rawCliState: status.rawCliState,
+        command: status.command,
+        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+        ...bootInfo(),
+        tail,
+      });
+    } else if (native === "launch_failed") {
+      return jsonResult({
+        state: "launch_failed",
+        elapsedMs: Date.now() - started,
+        polls,
+        signalSource: "cliState",
+        rawCliState: status.rawCliState,
+        command: status.command,
+        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+        ...bootInfo(),
+        tail,
+      });
+    } else if (native === "agent_ready") {
+      if (
+        requireBusyTransition &&
+        baseline !== undefined &&
+        baseline.state !== "agent_ready"
+      ) {
+        transitionSeen = true;
+      }
+      if (!requireBusyTransition || transitionSeen) {
+        return jsonResult({
+          state: "agent_ready",
+          elapsedMs: Date.now() - started,
+          polls,
+          signalSource: "cliState",
+          rawCliState: status.rawCliState,
+          command: status.command,
+          runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+          ...bootInfo(),
+          tail,
+        });
+      }
+    }
+    if (
+      native === "agent_busy" ||
+      native === "agent_starting" ||
+      (native === "agent_ready" && requireBusyTransition && !transitionSeen)
+    ) {
+      if (baseline === undefined) {
+        baseline = {
+          source: "cliState",
+          state: native,
+          rawCliState: status.rawCliState,
+        };
+      }
+      const remaining = timeoutMs - (Date.now() - started);
+      if (remaining <= 0) break;
+      await sleep(Math.min(pollMs, remaining));
+      continue;
+    }
+
+    const classified = classifyReadiness({
+      pane: lastPane,
+      provider: args.provider,
+      readyPattern,
+      errorPattern,
+      busyPattern,
+    });
+    // Same echo gate as the native path — a pane-classified ready (bare
+    // composer / frame signature) before the echo marker is only the
+    // pre-submit window, not evidence.
+    const classifiedState =
+      expectEcho && !echoSeen && classified.state === "agent_ready"
+        ? "agent_starting"
+        : classified.state;
+    if (baseline === undefined) {
+      baseline = {
+        source: "pane",
+        state: classifiedState,
+        reason: classified.reason,
+        rawCliState: status.rawCliState,
+      };
+    } else if (
+      requireBusyTransition &&
+      classifiedState === "agent_ready" &&
+      baseline.state !== "agent_ready"
+    ) {
+      transitionSeen = true;
+    }
+    if (classifiedState === "agent_ready") {
+      if (requireBusyTransition && !transitionSeen) {
+        const remaining = timeoutMs - (Date.now() - started);
+        if (remaining <= 0) break;
+        await sleep(Math.min(pollMs, remaining));
+        continue;
+      }
+      return jsonResult({
+        state: "agent_ready",
+        elapsedMs: Date.now() - started,
+        polls,
+        signalSource: "pane",
+        rawCliState: status.rawCliState,
+        command: status.command,
+        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+        ...bootInfo(),
+        tail,
+      });
+    }
+    if (classifiedState === "agent_blocked") {
+      // pane-side approval-dialog detection (claude plan/permission
+      // prompts) — parallel to the native agent_blocked branch, needed
+      // since claude ready-for-review no longer maps to blocked.
+      return jsonResult({
+        state: "agent_blocked",
+        reason: classified.reason,
+        elapsedMs: Date.now() - started,
+        polls,
+        signalSource: "pane",
+        rawCliState: status.rawCliState,
+        command: status.command,
+        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+        ...bootInfo(),
+        tail,
+      });
+    }
+    if (
+      !expectEcho &&
+      !requireBusyTransition &&
+      classifiedState === "agent_starting" &&
+      classified.reason === "input_queued"
+    ) {
+      // Under expectEcho the queued composer content is (or contains)
+      // our own bootstrap prompt awaiting auto-submit — promoting it to
+      // ready would defeat the echo gate, so the promotion is disabled.
+      return jsonResult({
+        state: "agent_ready",
+        reason: "composer_placeholder_assumed",
+        elapsedMs: Date.now() - started,
+        polls,
+        signalSource: "pane",
+        rawCliState: status.rawCliState,
+        command: status.command,
+        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+        ...bootInfo(),
+        tail,
+      });
+    }
+    if (classifiedState === "launch_failed") {
+      return jsonResult({
+        state: "launch_failed",
+        elapsedMs: Date.now() - started,
+        polls,
+        signalSource: "pane",
+        rawCliState: status.rawCliState,
+        command: status.command,
+        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+        ...bootInfo(),
+        tail,
+      });
+    }
+    lastSignalSource = "pane";
+    if (classifiedState === "agent_busy") {
+      transitionSeen = true;
+    }
+    // agent_busy is a non-terminal readiness state for wait_ready.
+
+    const remaining = timeoutMs - (Date.now() - started);
+    if (remaining <= 0) break;
+    await sleep(Math.min(pollMs, remaining));
+  }
+
+  return jsonResult({
+    state: "timeout",
+    elapsedMs: Date.now() - started,
+    polls,
+    signalSource: lastSignalSource,
+    rawCliState: lastRawCliState,
+    command: lastCommand,
+    baseline,
+    transitionSeen,
+    runtimeError: runtimeErrorInTail(tailLines(lastPane, 15), runtimeErrorPattern),
+    ...bootInfo(),
+    tail: tailLines(lastPane, 15),
+  });
+}
+
+async function runAgentStatus(args: AgentStatusArgs): Promise<CallToolResult> {
+  validateId(args.agentId, "agentId");
+  validateId(args.requestId, "requestId");
+  const status = await tabStatus(args.workspaceId, args.tabId);
+  const alive = status.alive;
+  const pane = alive ? await capturePane(args.workspaceId, args.tabId) : "";
+  const tail = tailLines(pane, 15);
+  const { readyPattern, errorPattern, busyPattern, runtimeErrorPattern } =
+    compileAllPatterns(args, args.provider);
+  let signalSource: "cliState" | "pane" = "cliState";
+  let readiness:
+    | { state: string; reason?: string }
+    | ReturnType<typeof classifyReadiness>;
+  if (!alive) {
+    readiness = { state: "exited", reason: "tab exited" };
+  } else if (isShellCommand(status.command)) {
+    readiness = {
+      state: "shell_ready",
+      reason: "foreground command is shell",
+    };
+  } else {
+    const native = nativeCliState(args.provider, status.rawCliState);
+    if (native !== null) {
+      readiness = { state: native };
+    } else {
+      signalSource = "pane";
+      readiness = classifyReadiness({
+        pane,
+        provider: args.provider,
+        readyPattern,
+        errorPattern,
+        busyPattern,
+      });
+    }
+  }
+
+  let doneSignal: { found: boolean; status?: "complete" | "blocked" } = {
+    found: false,
+  };
+  let reportFile:
+    | {
+        path: string;
+        exists: boolean;
+        statusLine?: "complete" | "blocked" | "invalid";
+        reqMatch?: boolean;
+        eofPresent?: boolean;
+        bytes?: number;
+      }
+    | undefined;
+  if (args.agentId !== undefined && args.turn !== undefined) {
+    doneSignal = parseDoneSignal({
+      pane,
+      agentId: args.agentId,
+      turn: args.turn,
+      requestId: args.requestId,
+    });
+    const workspaceDir = await resolveWorkspaceDir(args.workspaceId);
+    const path = agentReportPath(workspaceDir, args.agentId, args.turn);
+    if (args.requestId !== undefined) {
+      const check = await readReportFile(
+        workspaceDir,
+        args.agentId,
+        args.turn,
+        args.requestId,
+      );
+      reportFile = {
+        path,
+        ...(await reportFileStatus(check, path, args.requestId)),
+      };
+    } else {
+      reportFile = { path, exists: false };
+    }
+  }
+
+  return jsonResult({
+    alive,
+    readiness,
+    signalSource,
+    rawCliState: status.rawCliState,
+    command: status.command,
+    runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
+    doneSignal,
+    reportFile,
+    tail,
+  });
 }
 
 export function registerAgentTools(server: McpServer): void {
@@ -1229,354 +1632,7 @@ export function registerAgentTools(server: McpServer): void {
         "Primary agent orchestration tool: poll a tab until an agent is ready, still starting/busy, launch_failed, exited, or timeout. Use pmux_send_input/pmux_capture_pane only as low-level fallbacks. agent_busy is non-terminal and keeps polling. Boot verification (recommended after pmux_agent_start): pass {bootId, expectEcho:true} — agent_ready is then returned ONLY on the bootstrap DONE marker (completion evidence; supersedes ready heuristics, requireBusyTransition and runtimeError), and every response carries boot.fileSeen (SessionStart boot-signal file — diagnostic only; on echo timeout, fileSeen:false suggests launch/hook-trust failure while fileSeen:true suggests the model never answered). Default timeout rises to 90s under expectEcho. requireBusyTransition defaults false for boot readiness; set true when waiting after send so ready is returned only after busy was observed or an initial non-ready baseline later changes to ready. In boot mode only (and never under expectEcho), pane fallback input_queued can be treated as a composer placeholder and returned ready; send validation remains strict. Uses pane capture + tab_status only; no server-side registry is kept. Session lifetime contract: keep the tab open until the task is finished, then close it with pmux_close_tab.",
       inputSchema: S.agentWaitReadyShape,
     },
-    guard(async (args: AgentWaitReadyArgs) => {
-      const started = Date.now();
-      const expectEcho = args.expectEcho ?? false;
-      if (expectEcho && args.bootId === undefined) {
-        throw new ToolError(
-          "expectEcho requires bootId (returned by pmux_agent_start).",
-        );
-      }
-      // echo completion includes a model turn — 30s is too tight for a cold
-      // boot + first inference, so the default widens (합의 항목 2).
-      const timeoutMs = args.timeoutMs ?? (expectEcho ? 90_000 : 30_000);
-      const pollMs = args.pollMs ?? 1_500;
-      const requireBusyTransition = args.requireBusyTransition ?? false;
-      const bootFile =
-        args.bootId !== undefined ? bootFilePath(args.bootId) : undefined;
-      let fileSeen = false;
-      let echoSeen = false;
-      // Diagnostic only — fileSeen never feeds readiness (진단 전용, 합의
-      // 항목 3). On an expectEcho timeout it gives the 2-bit diagnosis:
-      // fileSeen:false → launch/hook problem; fileSeen:true without echo →
-      // prompt not submitted / model auth / hang.
-      const bootInfo = () =>
-        args.bootId === undefined
-          ? {}
-          : {
-              boot: {
-                bootId: args.bootId,
-                fileSeen,
-                ...(expectEcho ? { echoSeen } : {}),
-              },
-            };
-      const readyPattern = compileOptionalPattern(
-        args.readyPattern,
-        "readyPattern",
-        defaultReadyPattern(args.provider),
-      );
-      const errorPattern = compileOptionalPattern(
-        args.errorPattern,
-        "errorPattern",
-        defaultErrorPattern(args.provider),
-      );
-      const busyPattern = compileOptionalPattern(
-        args.busyPattern,
-        "busyPattern",
-        defaultBusyPattern(args.provider),
-      );
-      const runtimeErrorPattern = compileRuntimeErrorPattern(args.runtimeErrorPattern);
-      let polls = 0;
-      let lastPane = "";
-      let lastRawCliState: string | null = null;
-      let lastCommand: string | null = null;
-      let lastSignalSource: "cliState" | "pane" = "pane";
-      let transitionSeen = false;
-      let baseline:
-        | {
-            source: "cliState" | "pane";
-            state: string;
-            reason?: string;
-            rawCliState: string | null;
-          }
-        | undefined;
-
-      while (Date.now() - started <= timeoutMs) {
-        const status = await tabStatus(args.workspaceId, args.tabId);
-        lastRawCliState = status.rawCliState;
-        lastCommand = status.command;
-        if (bootFile !== undefined && !fileSeen) fileSeen = bootFileSeen(args.bootId as string);
-        if (!status.alive) {
-          const tail = tailLines(lastPane, 15);
-          return jsonResult({
-            state: "exited",
-            elapsedMs: Date.now() - started,
-            polls,
-            signalSource: "cliState",
-            rawCliState: status.rawCliState,
-            command: status.command,
-            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-            ...bootInfo(),
-            tail,
-          });
-        }
-
-        lastPane = await capturePane(args.workspaceId, args.tabId);
-        polls += 1;
-        const tail = tailLines(lastPane, 15);
-
-        if (isShellCommand(status.command)) {
-          return jsonResult({
-            state: "launch_failed",
-            elapsedMs: Date.now() - started,
-            polls,
-            signalSource: "cliState",
-            rawCliState: status.rawCliState,
-            command: status.command,
-            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-            ...bootInfo(),
-            tail,
-          });
-        }
-
-        if (expectEcho && !echoSeen && args.bootId !== undefined) {
-          const echo = parseDoneSignal({
-            pane: lastPane,
-            agentId: BOOTSTRAP_ECHO_AGENT_ID,
-            turn: BOOTSTRAP_ECHO_TURN,
-            requestId: args.bootId,
-          });
-          if (echo.found && echo.status === "blocked") {
-            // The marker WAS seen — reflect that in boot.echoSeen so the
-            // diagnosis reads "echo arrived but reported blocked", not
-            // "echo never arrived" (codex 리뷰 NIT).
-            echoSeen = true;
-            return jsonResult({
-              state: "agent_blocked",
-              reason: "bootstrap_echo_blocked",
-              elapsedMs: Date.now() - started,
-              polls,
-              signalSource: "pane",
-              rawCliState: status.rawCliState,
-              command: status.command,
-              runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-              ...bootInfo(),
-              tail,
-            });
-          }
-          if (echo.found) {
-            // Completion evidence — supersedes ready-pattern heuristics,
-            // requireBusyTransition bookkeeping AND a matched runtimeError
-            // (which is still reported alongside), same precedence the turn
-            // tool already uses (합의 항목 2).
-            echoSeen = true;
-            return jsonResult({
-              state: "agent_ready",
-              reason: "bootstrap_echo",
-              elapsedMs: Date.now() - started,
-              polls,
-              signalSource: "pane",
-              rawCliState: status.rawCliState,
-              command: status.command,
-              runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-              ...bootInfo(),
-              tail,
-            });
-          }
-        }
-
-        const rawNative = nativeCliState(args.provider, status.rawCliState);
-        // Single echo gate (opus 리뷰 항목 3): before the echo marker is
-        // seen, NO ready path may fire — native needs-input can be the
-        // pre-submit window right before the CLI auto-submits the
-        // bootstrap prompt (실측: that window polluted the
-        // requireBusyTransition baseline and hung it). Demote to
-        // agent_starting so every ready branch below keeps polling.
-        const native =
-          expectEcho && !echoSeen && rawNative === "agent_ready"
-            ? "agent_starting"
-            : rawNative;
-        if (native === "agent_busy") {
-          transitionSeen = true;
-          lastSignalSource = "cliState";
-        } else if (native === "agent_blocked") {
-          return jsonResult({
-            state: "agent_blocked",
-            elapsedMs: Date.now() - started,
-            polls,
-            signalSource: "cliState",
-            rawCliState: status.rawCliState,
-            command: status.command,
-            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-            ...bootInfo(),
-            tail,
-          });
-        } else if (native === "launch_failed") {
-          return jsonResult({
-            state: "launch_failed",
-            elapsedMs: Date.now() - started,
-            polls,
-            signalSource: "cliState",
-            rawCliState: status.rawCliState,
-            command: status.command,
-            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-            ...bootInfo(),
-            tail,
-          });
-        } else if (native === "agent_ready") {
-          if (
-            requireBusyTransition &&
-            baseline !== undefined &&
-            baseline.state !== "agent_ready"
-          ) {
-            transitionSeen = true;
-          }
-          if (!requireBusyTransition || transitionSeen) {
-            return jsonResult({
-              state: "agent_ready",
-              elapsedMs: Date.now() - started,
-              polls,
-              signalSource: "cliState",
-              rawCliState: status.rawCliState,
-              command: status.command,
-              runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-              ...bootInfo(),
-              tail,
-            });
-          }
-        }
-        if (
-          native === "agent_busy" ||
-          native === "agent_starting" ||
-          (native === "agent_ready" && requireBusyTransition && !transitionSeen)
-        ) {
-          if (baseline === undefined) {
-            baseline = {
-              source: "cliState",
-              state: native,
-              rawCliState: status.rawCliState,
-            };
-          }
-          const remaining = timeoutMs - (Date.now() - started);
-          if (remaining <= 0) break;
-          await sleep(Math.min(pollMs, remaining));
-          continue;
-        }
-
-        const classified = classifyReadiness({
-          pane: lastPane,
-          provider: args.provider,
-          readyPattern,
-          errorPattern,
-          busyPattern,
-        });
-        // Same echo gate as the native path — a pane-classified ready (bare
-        // composer / frame signature) before the echo marker is only the
-        // pre-submit window, not evidence.
-        const classifiedState =
-          expectEcho && !echoSeen && classified.state === "agent_ready"
-            ? "agent_starting"
-            : classified.state;
-        if (baseline === undefined) {
-          baseline = {
-            source: "pane",
-            state: classifiedState,
-            reason: classified.reason,
-            rawCliState: status.rawCliState,
-          };
-        } else if (
-          requireBusyTransition &&
-          classifiedState === "agent_ready" &&
-          baseline.state !== "agent_ready"
-        ) {
-          transitionSeen = true;
-        }
-        if (classifiedState === "agent_ready") {
-          if (requireBusyTransition && !transitionSeen) {
-            const remaining = timeoutMs - (Date.now() - started);
-            if (remaining <= 0) break;
-            await sleep(Math.min(pollMs, remaining));
-            continue;
-          }
-          return jsonResult({
-            state: "agent_ready",
-            elapsedMs: Date.now() - started,
-            polls,
-            signalSource: "pane",
-            rawCliState: status.rawCliState,
-            command: status.command,
-            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-            ...bootInfo(),
-            tail,
-          });
-        }
-        if (classifiedState === "agent_blocked") {
-          // pane-side approval-dialog detection (claude plan/permission
-          // prompts) — parallel to the native agent_blocked branch, needed
-          // since claude ready-for-review no longer maps to blocked.
-          return jsonResult({
-            state: "agent_blocked",
-            reason: classified.reason,
-            elapsedMs: Date.now() - started,
-            polls,
-            signalSource: "pane",
-            rawCliState: status.rawCliState,
-            command: status.command,
-            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-            ...bootInfo(),
-            tail,
-          });
-        }
-        if (
-          !expectEcho &&
-          !requireBusyTransition &&
-          classifiedState === "agent_starting" &&
-          classified.reason === "input_queued"
-        ) {
-          // Under expectEcho the queued composer content is (or contains)
-          // our own bootstrap prompt awaiting auto-submit — promoting it to
-          // ready would defeat the echo gate, so the promotion is disabled.
-          return jsonResult({
-            state: "agent_ready",
-            reason: "composer_placeholder_assumed",
-            elapsedMs: Date.now() - started,
-            polls,
-            signalSource: "pane",
-            rawCliState: status.rawCliState,
-            command: status.command,
-            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-            ...bootInfo(),
-            tail,
-          });
-        }
-        if (classifiedState === "launch_failed") {
-          return jsonResult({
-            state: "launch_failed",
-            elapsedMs: Date.now() - started,
-            polls,
-            signalSource: "pane",
-            rawCliState: status.rawCliState,
-            command: status.command,
-            runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-            ...bootInfo(),
-            tail,
-          });
-        }
-        lastSignalSource = "pane";
-        if (classifiedState === "agent_busy") {
-          transitionSeen = true;
-        }
-        // agent_busy is a non-terminal readiness state for wait_ready.
-
-        const remaining = timeoutMs - (Date.now() - started);
-        if (remaining <= 0) break;
-        await sleep(Math.min(pollMs, remaining));
-      }
-
-      return jsonResult({
-        state: "timeout",
-        elapsedMs: Date.now() - started,
-        polls,
-        signalSource: lastSignalSource,
-        rawCliState: lastRawCliState,
-        command: lastCommand,
-        baseline,
-        transitionSeen,
-        runtimeError: runtimeErrorInTail(tailLines(lastPane, 15), runtimeErrorPattern),
-        ...bootInfo(),
-        tail: tailLines(lastPane, 15),
-      });
-    }),
+    guard(runWaitReady),
   );
 
   server.registerTool(
@@ -1625,105 +1681,6 @@ export function registerAgentTools(server: McpServer): void {
         "Primary agent orchestration tool: return a no-wait v2.1 status snapshot. Use pmux_tab_status/pmux_capture_pane only as low-level fallbacks. Includes tab alive, provider-specific readiness, optional DONE signal for agentId/turn/requestId, optional report-file check, runtimeError when detected, and pane tail. No server-side state is kept.",
       inputSchema: S.agentStatusShape,
     },
-    guard(async (args: AgentStatusArgs) => {
-      validateId(args.agentId, "agentId");
-      validateId(args.requestId, "requestId");
-      const status = await tabStatus(args.workspaceId, args.tabId);
-      const alive = status.alive;
-      const pane = alive ? await capturePane(args.workspaceId, args.tabId) : "";
-      const tail = tailLines(pane, 15);
-      const readyPattern = compileOptionalPattern(
-        args.readyPattern,
-        "readyPattern",
-        defaultReadyPattern(args.provider),
-      );
-      const errorPattern = compileOptionalPattern(
-        args.errorPattern,
-        "errorPattern",
-        defaultErrorPattern(args.provider),
-      );
-      const busyPattern = compileOptionalPattern(
-        args.busyPattern,
-        "busyPattern",
-        defaultBusyPattern(args.provider),
-      );
-      const runtimeErrorPattern = compileRuntimeErrorPattern(args.runtimeErrorPattern);
-      let signalSource: "cliState" | "pane" = "cliState";
-      let readiness:
-        | { state: string; reason?: string }
-        | ReturnType<typeof classifyReadiness>;
-      if (!alive) {
-        readiness = { state: "exited", reason: "tab exited" };
-      } else if (isShellCommand(status.command)) {
-        readiness = {
-          state: "shell_ready",
-          reason: "foreground command is shell",
-        };
-      } else {
-        const native = nativeCliState(args.provider, status.rawCliState);
-        if (native !== null) {
-          readiness = { state: native };
-        } else {
-          signalSource = "pane";
-          readiness = classifyReadiness({
-            pane,
-            provider: args.provider,
-            readyPattern,
-            errorPattern,
-            busyPattern,
-          });
-        }
-      }
-
-      let doneSignal: { found: boolean; status?: "complete" | "blocked" } = {
-        found: false,
-      };
-      let reportFile:
-        | {
-            path: string;
-            exists: boolean;
-            statusLine?: "complete" | "blocked" | "invalid";
-            reqMatch?: boolean;
-            eofPresent?: boolean;
-            bytes?: number;
-          }
-        | undefined;
-      if (args.agentId !== undefined && args.turn !== undefined) {
-        doneSignal = parseDoneSignal({
-          pane,
-          agentId: args.agentId,
-          turn: args.turn,
-          requestId: args.requestId,
-        });
-        const workspaceDir = await resolveWorkspaceDir(args.workspaceId);
-        const path = agentReportPath(workspaceDir, args.agentId, args.turn);
-        if (args.requestId !== undefined) {
-          const check = await readReportFile(
-            workspaceDir,
-            args.agentId,
-            args.turn,
-            args.requestId,
-          );
-          reportFile = {
-            path,
-            ...(await reportFileStatus(check, path, args.requestId)),
-          };
-        } else {
-          reportFile = { path, exists: false };
-        }
-      }
-
-      return jsonResult({
-        alive,
-        readiness,
-        signalSource,
-        rawCliState: status.rawCliState,
-        command: status.command,
-        runtimeError: runtimeErrorInTail(tail, runtimeErrorPattern),
-        doneSignal,
-        reportFile,
-        tail,
-      });
-    }),
+    guard(runAgentStatus),
   );
 }
