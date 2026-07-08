@@ -1,13 +1,7 @@
 import { callApi } from "../http.js";
 import { ToolError } from "../errors.js";
 import { defaultBusyPattern } from "../profiles.js";
-import {
-  classifyReadiness,
-  extractMarkerBlock,
-  hasPriorTurnCompletion,
-  parseDoneSignal,
-  tailLines,
-} from "../pane.js";
+import { classifyReadiness, extractMarkerBlock, hasPriorTurnCompletion, parseDoneSignal, TAIL_LINES, tailLines } from "../pane.js";
 import {
   agentReportPath,
   makeFileFooter,
@@ -50,7 +44,7 @@ export async function sendAgentPrompt(args: AgentSendArgs): Promise<AgentSendVal
     };
   }
   const pane = await capturePane(args.workspaceId, args.tabId);
-  const tail = tailLines(pane, 15);
+  const tail = tailLines(pane, TAIL_LINES);
 
   if (isShellCommand(status.command)) {
     return withRuntimeError(
@@ -283,7 +277,7 @@ export async function captureAgentEvidence(args: AgentCaptureArgs): Promise<Capt
   validateId(args.agentId, "agentId");
   validateId(args.requestId, "requestId");
   const pane = await capturePane(args.workspaceId, args.tabId);
-  const tail = tailLines(pane, 15);
+  const tail = tailLines(pane, TAIL_LINES);
   const doneSignal = parseDoneSignal({
     pane,
     agentId: args.agentId,
@@ -426,7 +420,7 @@ export async function runAgentTurn(args: AgentTurnArgs): Promise<Record<string, 
     }
 
     const pane = await capturePane(args.workspaceId, args.tabId);
-    lastTail = tailLines(pane, 15);
+    lastTail = tailLines(pane, TAIL_LINES);
     const readiness = await classifyTurnReadiness({
       workspaceId: args.workspaceId,
       tabId: args.tabId,

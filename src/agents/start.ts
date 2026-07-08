@@ -6,7 +6,7 @@ import { callApi } from "../http.js";
 import { ToolError } from "../errors.js";
 import { jsonResult } from "../tool-result.js";
 import { buildAgentCommand } from "../profiles.js";
-import { tailLines } from "../pane.js";
+import { TAIL_LINES, tailLines } from "../pane.js";
 import {
   bootFilePath,
   buildBootstrapEchoPrompt,
@@ -196,7 +196,7 @@ export async function runAgentStart(args: AgentStartArgs): Promise<CallToolResul
       recommendedFileOutput: fileOutputHint,
       next,
       fallback: "wait_ready timeout이나 판정 불확실 시 pmux_capture_pane으로 직접 확인",
-      tail: tailLines(shell.pane, 15),
+      tail: tailLines(shell.pane, TAIL_LINES),
     });
   }
   await callApi("POST", `/api/cli/tabs/${encodeURIComponent(tabId)}/send`, {

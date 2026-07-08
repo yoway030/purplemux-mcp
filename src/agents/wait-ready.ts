@@ -2,7 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { ToolError } from "../errors.js";
 import { jsonResult } from "../tool-result.js";
-import { classifyReadiness, parseDoneSignal, tailLines } from "../pane.js";
+import { classifyReadiness, parseDoneSignal, TAIL_LINES, tailLines } from "../pane.js";
 import {
   BOOTSTRAP_ECHO_AGENT_ID,
   BOOTSTRAP_ECHO_TURN,
@@ -73,7 +73,7 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
     lastCommand = status.command;
     if (bootFile !== undefined && !fileSeen) fileSeen = bootFileSeen(args.bootId as string);
     if (!status.alive) {
-      const tail = tailLines(lastPane, 15);
+      const tail = tailLines(lastPane, TAIL_LINES);
       return jsonResult({
         state: "exited",
         elapsedMs: Date.now() - started,
@@ -89,7 +89,7 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
 
     lastPane = await capturePane(args.workspaceId, args.tabId);
     polls += 1;
-    const tail = tailLines(lastPane, 15);
+    const tail = tailLines(lastPane, TAIL_LINES);
 
     if (isShellCommand(status.command)) {
       return jsonResult({
@@ -354,8 +354,8 @@ export async function runWaitReady(args: AgentWaitReadyArgs): Promise<CallToolRe
     command: lastCommand,
     baseline,
     transitionSeen,
-    runtimeError: runtimeErrorInTail(tailLines(lastPane, 15), runtimeErrorPattern),
+    runtimeError: runtimeErrorInTail(tailLines(lastPane, TAIL_LINES), runtimeErrorPattern),
     ...bootInfo(),
-    tail: tailLines(lastPane, 15),
+    tail: tailLines(lastPane, TAIL_LINES),
   });
 }

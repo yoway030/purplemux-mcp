@@ -13,7 +13,7 @@ import { looksShellReady, recommendedFileOutput } from "../../dist/agents/start.
 import { extractTabId, sessionName } from "../../dist/agents/api.js";
 import { buildPaneFallbackFooter, reportFileStatus } from "../../dist/agents/report.js";
 import { makeMarkers } from "../../dist/pane.js";
-import { agentReportPath, readReportFile } from "../../dist/paths.js";
+import { MARKER_PREFIX, agentReportPath, readReportFile } from "../../dist/paths.js";
 
 // ---- compileAllPatterns ---------------------------------------------------
 
@@ -100,8 +100,8 @@ check("buildPaneFallbackFooter: split-marker safety (no complete marker in foote
   const { begin, end } = makeMarkers(o);
   assert(!footer.includes(begin), "footer must not contain the complete BEGIN marker");
   assert(!footer.includes(end), "footer must not contain the complete END marker");
-  assert(footer.includes(begin.slice("<<<PMUX_".length)), "footer carries BEGIN tail part");
-  assert(footer.includes(end.slice("<<<PMUX_".length)), "footer carries END tail part");
+  assert(footer.includes(begin.slice(MARKER_PREFIX.length)), "footer carries BEGIN tail part");
+  assert(footer.includes(end.slice(MARKER_PREFIX.length)), "footer carries END tail part");
   assert(footer.includes("40줄"), "maxResponseLines is embedded");
 });
 

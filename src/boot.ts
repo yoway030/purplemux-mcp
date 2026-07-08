@@ -272,6 +272,15 @@ export function buildBootstrapEchoPrompt(bootId: string): string {
 
 const PRUNE_AGE_MS = 24 * 60 * 60 * 1000;
 
+// Filename patterns derived from the single ID allowlist (ID_RE) so an ID
+// policy change cannot drift apart from the prune matchers. `.source` is
+// anchored (^...$) — strip the anchors before composing.
+const ID_SRC = ID_RE.source.slice(1, -1);
+const BOOT_FILE_NAME_RE = new RegExp(`^${ID_SRC}(?:\\.tmp)?$`);
+const BOOT_SETTINGS_NAME_RE = new RegExp(
+  `^hooks-with-boot-${ID_SRC}\\.json(?:\\.tmp)?$`,
+);
+
 /**
  * Best-effort cleanup of boot artifacts older than 24h: boot-signal files
  * (except the current bootId) and per-launch hooks-with-boot-*.json
@@ -287,12 +296,12 @@ export async function pruneBootArtifacts(currentBootId: string): Promise<void> {
       dir: bootDir(),
       match: (name) =>
         name !== currentBootId &&
-        /^[a-z0-9][a-z0-9_-]{0,31}(?:\.tmp)?$/.test(name),
+        BOOT_FILE_NAME_RE.test(name),
     },
     {
       dir: purplemuxDir(),
       match: (name) =>
-        /^hooks-with-boot-[a-z0-9][a-z0-9_-]{0,31}\.json(?:\.tmp)?$/.test(name) &&
+        BOOT_SETTINGS_NAME_RE.test(name) &&
         !name.startsWith(`hooks-with-boot-${currentBootId}.json`),
     },
   ];

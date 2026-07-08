@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import { makeMarkers } from "../pane.js";
-import { readReportFile } from "../paths.js";
+import { MARKER_PREFIX, STATUS_LINE_RE, readReportFile } from "../paths.js";
 import type { ReportFileStatus } from "./types.js";
 
 export function buildPaneFallbackFooter(o: {
@@ -11,13 +11,13 @@ export function buildPaneFallbackFooter(o: {
   maxResponseLines: number;
 }): string {
   const { begin, end } = makeMarkers(o);
-  const beginRest = begin.slice("<<<PMUX_".length);
-  const endRest = end.slice("<<<PMUX_".length);
+  const beginRest = begin.slice(MARKER_PREFIX.length);
+  const endRest = end.slice(MARKER_PREFIX.length);
   return [
     `[응답 규약] 응답은 ${o.maxResponseLines}줄 이내로 작성하세요.`,
-    `첫 줄에는 "<<<PMUX_" 뒤에 "${beginRest}" 를 이어붙인 한 줄만 출력하세요.`,
+    `첫 줄에는 "${MARKER_PREFIX}" 뒤에 "${beginRest}" 를 이어붙인 한 줄만 출력하세요.`,
     "그 다음 줄부터 본문을 출력하세요.",
-    `마지막 줄에는 "<<<PMUX_" 뒤에 "${endRest}" 를 이어붙인 한 줄만 출력하세요.`,
+    `마지막 줄에는 "${MARKER_PREFIX}" 뒤에 "${endRest}" 를 이어붙인 한 줄만 출력하세요.`,
   ].join("\n");
 }
 
@@ -32,7 +32,7 @@ async function readReportStatusLine(
   } catch {
     return {};
   }
-  const match = /^status=(complete|blocked) req=(\S+)$/.exec(firstLine);
+  const match = STATUS_LINE_RE.exec(firstLine);
   if (!match) return { statusLine: "invalid" };
   return {
     statusLine: match[1] as "complete" | "blocked",

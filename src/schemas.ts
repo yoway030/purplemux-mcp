@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ID_RE } from "./profiles.js";
+
 /**
  * panelType enum (6) from Stage 1 §3. Default when omitted = "terminal".
  * Invalid → server 400 { error:"Invalid panelType", validPanelTypes:[…] }.
@@ -165,11 +167,11 @@ const permissionModeEnum = z.enum([
 
 const agentId = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/)
+  .regex(ID_RE)
   .describe("Caller-owned agent id: ^[a-z0-9][a-z0-9_-]{0,31}$.");
 const requestId = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/)
+  .regex(ID_RE)
   .optional()
   .describe("Optional caller-owned request id using the same format as agentId.");
 const turn = z
@@ -247,7 +249,7 @@ export const agentWaitReadyShape = {
     .describe("Defaults false for boot readiness. Set true when waiting after send; ready is returned only after a busy state has been observed. Superseded by expectEcho (the DONE marker is itself completion evidence)."),
   bootId: z
     .string()
-    .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/)
+    .regex(ID_RE)
     .optional()
     .describe("bootId returned by pmux_agent_start. When set, every response includes boot.fileSeen (SessionStart boot-signal file existence — diagnostic only, never gates readiness)."),
   expectEcho: z

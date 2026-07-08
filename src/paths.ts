@@ -46,7 +46,7 @@ export type ReportFileCheck =
   | { state: "invalid"; reason: "status_line" | "req_mismatch" | "eof_missing" }
   | { state: "valid"; status: "complete" | "blocked"; content: string; bytes: number };
 
-const STATUS_LINE_RE = /^status=(complete|blocked) req=(\S+)$/;
+export const STATUS_LINE_RE = /^status=(complete|blocked) req=(\S+)$/;
 
 /**
  * Read + validate the report file for one agent turn (design v2 §3.2/§4.5).

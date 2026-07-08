@@ -24,6 +24,13 @@ function stripAnsi(s: string): string {
 }
 
 /** Last `n` lines of `s` (raw split on \n / \r\n), joined with \n. */
+/**
+ * Standard tail width for agent-tool responses/validation (the `tail` field
+ * and readiness checks). Distinct from TAIL_WIDTH (30) used by pane
+ * classification internals.
+ */
+export const TAIL_LINES = 15;
+
 export function tailLines(s: string, n: number): string {
   if (n <= 0) return "";
   return s.split(/\r?\n/).slice(-n).join("\n");

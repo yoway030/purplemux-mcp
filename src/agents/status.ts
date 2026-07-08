@@ -1,7 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { jsonResult } from "../tool-result.js";
-import { classifyReadiness, parseDoneSignal, tailLines } from "../pane.js";
+import { classifyReadiness, parseDoneSignal, TAIL_LINES, tailLines } from "../pane.js";
 import { agentReportPath, readReportFile } from "../paths.js";
 import { capturePane, resolveWorkspaceDir, tabStatus } from "./api.js";
 import { validateId } from "./common.js";
@@ -20,7 +20,7 @@ export async function runAgentStatus(args: AgentStatusArgs): Promise<CallToolRes
   const status = await tabStatus(args.workspaceId, args.tabId);
   const alive = status.alive;
   const pane = alive ? await capturePane(args.workspaceId, args.tabId) : "";
-  const tail = tailLines(pane, 15);
+  const tail = tailLines(pane, TAIL_LINES);
   const { readyPattern, errorPattern, busyPattern, runtimeErrorPattern } =
     compileAllPatterns(args, args.provider);
   let signalSource: "cliState" | "pane" = "cliState";

@@ -1,13 +1,18 @@
-import type { Provider } from "../profiles.js";
+import type {
+  Effort,
+  PermissionMode,
+  Provider,
+  Sandbox,
+} from "../profiles.js";
 
 export type AgentStartArgs = {
   workspaceId: string;
   name?: string;
   provider: Provider;
   model?: string;
-  effort?: "low" | "medium" | "high" | "xhigh";
-  sandbox?: "read-only" | "workspace-write";
-  permissionMode?: "plan" | "manual" | "acceptEdits" | "dontAsk" | "auto";
+  effort?: Effort;
+  sandbox?: Sandbox;
+  permissionMode?: PermissionMode;
   shellTimeoutMs?: number;
   bootstrapEcho?: boolean;
 };
