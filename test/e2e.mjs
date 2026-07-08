@@ -1,23 +1,13 @@
 // Live end-to-end test of the purplemux MCP server against the running server.
 // Exercises the real tool round-trip + an error path. Cleans up its tab.
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const WS = process.env.PMUX_TEST_WS || 'ws-UJm6NN';
-const srv = spawn('node', [path.join(root, 'dist/index.js')], { stdio: ['pipe', 'pipe', 'inherit'] });
+import { createClient } from './lib/mcp-client.mjs';
 
-let buf = ''; const pend = new Map();
-srv.stdout.on('data', (d) => { buf += d.toString(); let i;
-  while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1);
-    if (!l.trim()) continue; let m; try { m = JSON.parse(l); } catch { continue; }
-    if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } } });
-let idc = 0;
-const send = (o) => srv.stdin.write(JSON.stringify(o) + '\n');
-const rpc = (method, params) => new Promise((r) => { const id = ++idc; pend.set(id, r); send({ jsonrpc: '2.0', id, method, params }); });
+const WS = process.env.PMUX_TEST_WS || 'ws-UJm6NN';
+const { srv, send, rpc, initialize } = createClient();
 const call = async (name, args = {}) => {
   const r = await rpc('tools/call', { name, arguments: args });
   const text = (r.result?.content || []).map((c) => c.text ?? `[${c.type}:${(c.data||'').length}b]`).join('');
@@ -31,8 +21,7 @@ let pass = 0, fail = 0;
 const check = (name, cond, extra = '') => { (cond ? pass++ : fail++); console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${extra ? ' :: ' + extra : ''}`); };
 
 const main = async () => {
-  await rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'e2e', version: '0' } });
-  send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+  await initialize('e2e');
 
   // 1. list_workspaces
   const ws = await call('pmux_list_workspaces');
@@ -91,7 +80,7 @@ const main = async () => {
   await new Promise((r) => setTimeout(r, 2500)); // shell init
 
   // 6. send_input WITHOUT newline (server auto-submits)
-  const mark = 'E2EOK' + Math.floor(idc * 7 + 13);
+  const mark = 'E2EOK' + (process.pid % 1000);
   const sent = await call('pmux_send_input', { workspaceId: WS, tabId, content: `echo ${mark}` });
   check('send_input', !sent.isError && j(sent.text)?.status === 'sent');
   await new Promise((r) => setTimeout(r, 2500));
