@@ -5,7 +5,7 @@
 An MCP server that lets **Claude Code / Codex** drive a local
 [purplemux](https://github.com/subicura/purplemux) instance (subicura's tmux + LLM
 workspace manager) — controlling workspaces, tabs, terminals, and (Electron) browser panels
-and **sub-agent orchestration** through **22 tools**.
+and **sub-agent orchestration** through **23 tools**.
 
 purplemux's CLI is a thin wrapper over a localhost HTTP API, so this server exposes that API
 directly as MCP tools (calling HTTP, not shelling out to the CLI). That lets an agent
@@ -32,10 +32,15 @@ The real purpose of this project is to **use the subscription-based CLIs (`claud
 - **The bridge.** purplemux hosts each subscription CLI in its own tmux pane (tab) and ships a
   local HTTP API to control them. **This MCP opens that API.** The orchestrator (e.g. this
   Claude Code) →
-  1. `pmux_create_tab` to open a `claude-code` / `codex-cli` tab,
-  2. `pmux_send_input` to push a task prompt (the server auto-submits with Enter),
-  3. `pmux_tab_status` / `pmux_capture_pane` to poll progress and collect the result,
+  1. `pmux_agent_start` to launch the claude/codex CLI in a tab (hook wiring + boot verification included),
+  2. `pmux_agent_wait_ready` to confirm bootstrap-echo completion evidence,
+  3. `pmux_agent_turn` to run per-turn work and recover responses losslessly,
   4. `pmux_close_tab` to clean up.
+
+  > `pmux_create_tab` with the `claude-code`/`codex-cli` panelType + `pmux_send_input` is **not**
+  > the sub-agent path — that panelType is a UI panel that may be an empty shell, and nothing
+  > manages readiness or output recovery. The low-level tools are for plain terminals and manual
+  > fallback only.
 
 In short: turn several LLMs' subscription CLI sessions into **callable worker agents** and run
 **fan-out** orchestration — split work across tabs, run them in parallel, poll status, and merge
@@ -67,16 +72,17 @@ is absorbed without restarting this server, and no env vars are needed on a norm
 
 ---
 
-## Tools (22)
+## Tools (23)
 
 **Agent orchestration (v2 — recommended entry point):** `pmux_agent_start` · `pmux_agent_wait_ready` ·
 `pmux_agent_send` · `pmux_agent_capture` · `pmux_agent_status` · `pmux_agent_turn`
 
 > Boots claude/codex with purplemux's hooks injected (consuming the native `cliState`/`command`
-> state channel) for deterministic readiness/busy detection, and retrieves responses losslessly
-> via a file protocol (request-id identity + EOF commit double gate). `pmux_agent_turn` bundles
-> send → poll → capture into one call per turn.
-> Design & rationale: [docs/worklog-20260707-workflow/design-v2.md](docs/worklog-20260707-workflow/design-v2.md), [design-v22.md](docs/worklog-20260707-workflow/design-v22.md)
+> state channel) for deterministic readiness/busy detection, verifies boot with a SessionStart
+> boot signal + bootstrap echo (evidence that the process started AND the model actually
+> answered), and retrieves responses losslessly via a file protocol (request-id identity + EOF
+> commit double gate). `pmux_agent_turn` bundles send → poll → capture into one call per turn.
+> Design & rationale: [docs/worklog-20260707-workflow/design-v2.md](docs/worklog-20260707-workflow/design-v2.md), [design-v22.md](docs/worklog-20260707-workflow/design-v22.md), [worklog/plan-boot-signal-echo.md](docs/worklog/plan-boot-signal-echo.md)
 
 **Terminal/tab (works headless):** `pmux_list_workspaces` · `pmux_list_tabs` ·
 `pmux_create_tab` · `pmux_get_tab` · `pmux_send_input` · `pmux_tab_status` ·
@@ -86,7 +92,12 @@ is absorbed without restarting this server, and no env vars are needed on a norm
 `pmux_browser_console` · `pmux_browser_network` · `pmux_browser_network_body` ·
 `pmux_browser_eval`
 
-**Util:** `pmux_api_guide` · `pmux_connection_info` (never emits the token)
+**Meta/util:** `pmux_guide` (this server's orchestration guide — LLM self-documentation) ·
+`pmux_api_guide` (purplemux HTTP API reference) · `pmux_connection_info` (never emits the token)
+
+> Connected LLMs receive the tool layering + golden path automatically via MCP `instructions`
+> at initialize time; the full guide (failure modes, recovery patterns) is one `pmux_guide`
+> call away.
 
 > `pmux_send_input` **auto-submits** (the server presses Enter) — do not append a newline; one
 > trailing `\n` is stripped for you. Browser tools return **503** on a headless (non-Electron)
@@ -101,7 +112,7 @@ Full features, install options, and usage examples: **[docs/USAGE.md](docs/USAGE
 
 ```bash
 npm run build && npm run typecheck
-npm run smoke     # handshake + 22 tools + a live list_workspaces
+npm run smoke     # handshake + 23 tools + a live list_workspaces
 npm run unit      # pure-function unit tests (fixture-based)
 npm run e2e       # live round-trip (12 checks) against a running purplemux
 ```
@@ -111,7 +122,7 @@ npm run e2e       # live round-trip (12 checks) against a running purplemux
 ## Layout
 
 ```
-src/            # config, http, errors, schemas, tools, index (stdio bootstrap)
+src/            # config, http, errors, schemas, tools, agents, boot, guide, pane, paths, profiles, index
 test/           # smoke + live e2e (Node, no framework)
 docs/
   USAGE.md               # features · install · usage

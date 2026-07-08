@@ -148,6 +148,8 @@ export const browserEvalShape = {
     .describe("JavaScript expression evaluated in the page (CDP, 10s timeout)."),
 } as const;
 
+export const guideShape = {} as const;
+
 export const apiGuideShape = {} as const;
 
 export const connectionInfoShape = {} as const;

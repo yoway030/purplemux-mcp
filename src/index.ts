@@ -3,12 +3,19 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { registerAll } from "./tools.js";
+import { SERVER_INSTRUCTIONS } from "./guide.js";
 
 async function main(): Promise<void> {
-  const server = new McpServer({
-    name: "purplemux-mcp",
-    version: "0.1.0",
-  });
+  const server = new McpServer(
+    {
+      name: "purplemux-mcp",
+      version: "0.1.0",
+    },
+    // Surfaced to every connected client at initialize time — the tool
+    // layering + golden path live here so orchestrators pick the agent
+    // layer before ever reading individual tool descriptions.
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   registerAll(server);
 

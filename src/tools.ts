@@ -9,6 +9,7 @@ import { ToolError } from "./errors.js";
 import { resolvePort, resolveToken, isValidPort } from "./config.js";
 import * as S from "./schemas.js";
 import { registerAgentTools } from "./agents.js";
+import { ORCHESTRATION_GUIDE } from "./guide.js";
 
 /** Encode any JSON-serializable value as a single text content block. */
 function jsonResult(value: unknown): CallToolResult {
@@ -94,7 +95,7 @@ export function registerAll(server: McpServer): void {
     "pmux_create_tab",
     {
       description:
-        "Create a tab in a workspace. panelType is one of terminal | claude-code | codex-cli | agent-sessions | web-browser | diff (default terminal); invalid → 400 with validPanelTypes. claude-code/codex-cli panelType tabs may be empty shells before UI attaches; for agent orchestration prefer pmux_agent_start. Creating claude-code/codex-cli without the CLI installed → 409 with suggestedCommand. Returns the created-tab object.",
+        "Create a tab in a workspace. panelType is one of terminal | claude-code | codex-cli | agent-sessions | web-browser | diff (default terminal); invalid → 400 with validPanelTypes. WARNING: claude-code/codex-cli panelType creates a UI panel, NOT a managed agent session — the pane may be an empty shell before the UI attaches, and sending prompts into it is unreliable. To run a subagent, use pmux_agent_start instead (it launches the CLI in a terminal tab under full protocol control). Creating claude-code/codex-cli without the CLI installed → 409 with suggestedCommand. Returns the created-tab object.",
       inputSchema: S.createTabShape,
     },
     guard(async ({ workspaceId, name, panelType }) =>
@@ -367,12 +368,23 @@ export function registerAll(server: McpServer): void {
     ),
   );
 
-  // 15. api guide
+  // 15. orchestration guide (local, static — no purplemux connection needed)
+  server.registerTool(
+    "pmux_guide",
+    {
+      description:
+        "Return the orchestration guide for THIS MCP server as markdown: tool layers (agent_* primary vs low-level fallbacks), the golden path for running claude/codex subagents, boot verification semantics, fileOutput routing, failure modes and recovery patterns. Call this before orchestrating subagents for the first time, or whenever an agent_* result is unclear. (For the purplemux HTTP API reference, use pmux_api_guide instead.)",
+      inputSchema: S.guideShape,
+    },
+    guard(async () => textResult(ORCHESTRATION_GUIDE)),
+  );
+
+  // 16. api guide
   server.registerTool(
     "pmux_api_guide",
     {
       description:
-        "Return the purplemux CLI API guide as markdown text (self-documentation / introspection).",
+        "Return the purplemux application's HTTP API reference as markdown (fetched from the running purplemux). This documents the underlying REST endpoints, NOT how to use this MCP server's tools — for orchestration guidance use pmux_guide.",
       inputSchema: S.apiGuideShape,
     },
     guard(async () => {
@@ -381,7 +393,7 @@ export function registerAll(server: McpServer): void {
     }),
   );
 
-  // 16. connection info (local, never leaks the token)
+  // 17. connection info (local, never leaks the token)
   server.registerTool(
     "pmux_connection_info",
     {
