@@ -23,9 +23,12 @@ check("buildAgentCommand: codex normal", () => {
   );
 });
 
-check("buildAgentCommand: codex defaults (no model/effort)", () => {
+check("buildAgentCommand: codex defaults — standing model/effort applied (2026-07-08 사용자 지정)", () => {
   const { command } = buildAgentCommand({ provider: "codex" });
-  assertEqual(command, "codex --no-alt-screen -s read-only");
+  assertEqual(
+    command,
+    "codex --no-alt-screen -s read-only -m gpt-5.5 -c model_reasoning_effort=medium",
+  );
 });
 
 check("buildAgentCommand: claude normal", () => {
@@ -36,7 +39,7 @@ check("buildAgentCommand: claude normal", () => {
   });
   assertEqual(
     command,
-    "claude --model claude-sonnet-5 --permission-mode acceptEdits",
+    "claude --model claude-sonnet-5 --permission-mode acceptEdits --effort high",
   );
 });
 
@@ -45,7 +48,18 @@ check("buildAgentCommand: claude effort → --effort flag (claude >=2.1.202, 실
     provider: "claude",
     effort: "xhigh",
   });
-  assertEqual(command, "claude --permission-mode plan --effort xhigh");
+  assertEqual(
+    command,
+    "claude --model claude-sonnet-5 --permission-mode plan --effort xhigh",
+  );
+});
+
+check("buildAgentCommand: claude defaults — standing model/effort applied (2026-07-08 사용자 지정)", () => {
+  const { command } = buildAgentCommand({ provider: "claude" });
+  assertEqual(
+    command,
+    "claude --model claude-sonnet-5 --permission-mode plan --effort high",
+  );
 });
 
 check("buildAgentCommand: rejects command-injection attempts in model", () => {

@@ -19,6 +19,20 @@ export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 /** model allowlist — no whitespace/metacharacters (design §4.6). */
 export const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+/**
+ * Standing default model/effort per provider (사용자 지정, 2026-07-08):
+ * claude = Sonnet 5 + high, codex = gpt-5.5 + medium. Applied when the
+ * caller omits model/effort; an explicit value always overrides.
+ */
+export const DEFAULT_MODEL: Record<Provider, string> = {
+  codex: "gpt-5.5",
+  claude: "claude-sonnet-5",
+};
+export const DEFAULT_EFFORT: Record<Provider, Effort> = {
+  codex: "medium",
+  claude: "high",
+};
+
 const EFFORT_VALUES: readonly Effort[] = ["low", "medium", "high", "xhigh"];
 const SANDBOX_VALUES: readonly Sandbox[] = ["read-only", "workspace-write"];
 const PERMISSION_MODE_VALUES: readonly PermissionMode[] = [
@@ -45,14 +59,18 @@ export interface AgentCommandOpts {
 export function buildAgentCommand(
   opts: AgentCommandOpts,
 ): { command: string } {
-  const { provider, model, effort, sandbox, permissionMode } = opts;
+  const { provider, sandbox, permissionMode } = opts;
+  // Omitted model/effort fall back to the standing defaults above — never to
+  // the CLI's own default, so the launched configuration is deterministic.
+  const model = opts.model ?? DEFAULT_MODEL[provider];
+  const effort = opts.effort ?? DEFAULT_EFFORT[provider];
 
-  if (model !== undefined && !MODEL_RE.test(model)) {
+  if (!MODEL_RE.test(model)) {
     throw new ToolError(
       `Invalid model "${model}": must match ${MODEL_RE.source}.`,
     );
   }
-  if (effort !== undefined && !EFFORT_VALUES.includes(effort)) {
+  if (!EFFORT_VALUES.includes(effort)) {
     throw new ToolError(
       `Invalid effort "${effort}": must be one of ${EFFORT_VALUES.join("|")}.`,
     );
@@ -65,8 +83,8 @@ export function buildAgentCommand(
       );
     }
     const parts = ["codex", "--no-alt-screen", "-s", sandbox ?? "read-only"];
-    if (model !== undefined) parts.push("-m", model);
-    if (effort !== undefined) parts.push("-c", `model_reasoning_effort=${effort}`);
+    parts.push("-m", model);
+    parts.push("-c", `model_reasoning_effort=${effort}`);
     return { command: parts.join(" ") };
   }
 
@@ -80,12 +98,12 @@ export function buildAgentCommand(
     );
   }
   const parts = ["claude"];
-  if (model !== undefined) parts.push("--model", model);
+  parts.push("--model", model);
   parts.push("--permission-mode", permissionMode ?? "plan");
   // claude >=2.1.202 has a real --effort flag (low|medium|high|xhigh|max, 실측
   // 2026-07-08) — pass it through instead of the old bootstrapHint workaround.
   // Our enum is the CLI's subset minus "max", so every accepted value is valid.
-  if (effort !== undefined) parts.push("--effort", effort);
+  parts.push("--effort", effort);
   return { command: parts.join(" ") };
 }
 

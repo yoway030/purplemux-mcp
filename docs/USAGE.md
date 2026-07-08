@@ -147,7 +147,7 @@ node test/e2e.mjs     # 라이브 라운드트립 12케이스 (스크래치 탭 
 ### 권장 워크플로
 
 1. `pmux_list_workspaces` — workspaceId 확인
-2. **사용자에게 model/effort 확인** — 사용자가 이미 지정하지 않았다면, 각 서브에이전트의 model/effort(codex는 sandbox, claude는 permissionMode 포함)를 물어보고 실행 (기본값으로 조용히 실행하지 말 것)
+2. **model/effort 기본값 확인** — 생략 시 표준 기본값이 적용된다: codex=`gpt-5.5`+`medium`, claude=`claude-sonnet-5`+`high` (2026-07-08 사용자 지정). 기본값과 다른 구성이 필요할 때만 사용자에게 확인. sandbox/permissionMode는 작업 성격에 맞게 선택
 3. `pmux_agent_start` — 탭 생성 + CLI 런치 + 부트 배선. 응답의 **`bootId`**, **`hooksWired`**(훅 주입 성공 여부), **`recommendedFileOutput`**(read-only/plan 에이전트는 `false`)을 확인
 4. `pmux_agent_wait_ready` `{bootId, expectEcho:true}` — bootstrap echo의 DONE 마커(완료 증거)가 보여야만 `agent_ready` (기본 timeout 90s)
 5. `pmux_agent_turn` — **turn=1부터** (bootstrap echo가 turn 0을 소비; turn 1에는 `expectPrevTurnEnd` 금지). `agentId`는 호출자가 직접 정한다(짧은 id를 만들어 이 탭의 모든 턴에 재사용; `boot`는 bootstrap echo 예약어라 금지). send+폴링+회수 한 번에 — **대부분 이것만으로 충분**. 직접 폴링하려면 `pmux_agent_send`+`pmux_agent_capture`

@@ -196,11 +196,11 @@ export const agentStartShape = {
     .max(64)
     .optional()
     .describe(
-      "Optional model id. Must satisfy ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$; invalid values return ToolError.",
+      "Optional model id. Must satisfy ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$; invalid values return ToolError. Defaults (standing user config): codex=gpt-5.5, claude=claude-sonnet-5.",
     ),
   effort: effortEnum
     .optional()
-    .describe("Optional reasoning effort. codex: -c model_reasoning_effort=<v>; claude: --effort <v> (claude >=2.1.202)."),
+    .describe("Optional reasoning effort. codex: -c model_reasoning_effort=<v>; claude: --effort <v> (claude >=2.1.202). Defaults: codex=medium, claude=high."),
   sandbox: sandboxEnum
     .optional()
     .describe("Codex-only sandbox. Defaults to read-only in the command profile."),

@@ -20,7 +20,7 @@ TOOL LAYERS — pick the right one:
 
 Golden path for a subagent:
 1. pmux_list_workspaces → workspaceId
-2. Ask the user which model/effort (codex: sandbox, claude: permissionMode) to use, unless already specified
+2. Model/effort defaults are preconfigured (codex=gpt-5.5+medium, claude=claude-sonnet-5+high) — launch with them; ask the user only when a different configuration seems needed (codex sandbox / claude permissionMode follow the task)
 3. pmux_agent_start → returns tabId, bootId, recommendedFileOutput
 4. pmux_agent_wait_ready {bootId, expectEcho:true} → agent_ready only on bootstrap-echo completion evidence
 5. pmux_agent_turn from turn=1 (turn 0 was the bootstrap echo; do not pass expectPrevTurnEnd on turn 1). agentId is caller-chosen: pick a short id (e.g. "worker1"; not "boot" — reserved by the bootstrap echo) and reuse it for every turn of this tab. If recommendedFileOutput was false, pass fileOutput:false.
@@ -55,9 +55,12 @@ full protocol control.
 ## 2. Golden path (one subagent, N turns)
 
 1. \`pmux_list_workspaces\` → pick \`workspaceId\`.
-2. **Ask the user** which model/effort each subagent should use (codex:
-   also sandbox; claude: also permissionMode) — unless the user already
-   specified them. Do not silently launch with defaults.
+2. Model/effort **defaults are preconfigured** (standing user config):
+   codex = \`gpt-5.5\` + \`medium\`, claude = \`claude-sonnet-5\` + \`high\` —
+   omitted values resolve to these, so launching without asking is the
+   normal path. Ask the user only when a different configuration seems
+   needed. Choose codex \`sandbox\` / claude \`permissionMode\` by task
+   (read-only/plan for review-only; write modes when files must change).
 3. \`pmux_agent_start {workspaceId, provider, model?, effort?, sandbox?/permissionMode?}\`
    → returns \`tabId\`, \`bootId\`, \`hooksWired\`, \`recommendedFileOutput\`,
    \`bootstrapEcho\`. Non-blocking: the CLI is still booting.
