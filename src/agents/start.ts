@@ -5,7 +5,11 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { callApi } from "../http.js";
 import { ToolError } from "../errors.js";
 import { jsonResult } from "../tool-result.js";
-import { buildAgentCommand } from "../profiles.js";
+import {
+  DEFAULT_PERMISSION_MODE,
+  DEFAULT_SANDBOX,
+  buildAgentCommand,
+} from "../profiles.js";
 import { TAIL_LINES, tailLines } from "../pane.js";
 import {
   bootFilePath,
@@ -133,9 +137,9 @@ async function waitForShellReady(o: {
 
 export function recommendedFileOutput(args: AgentStartArgs): boolean {
   if (args.provider === "codex") {
-    return (args.sandbox ?? "read-only") !== "read-only";
+    return (args.sandbox ?? DEFAULT_SANDBOX) !== "read-only";
   }
-  return (args.permissionMode ?? "plan") !== "plan";
+  return (args.permissionMode ?? DEFAULT_PERMISSION_MODE) !== "plan";
 }
 
 export function defaultBootstrapEcho(args: AgentStartArgs): boolean {
@@ -163,9 +167,12 @@ export async function runAgentStart(args: AgentStartArgs): Promise<CallToolResul
   }
   await pruneBootArtifacts(bootId);
   const fileOutputHint = recommendedFileOutput(args);
+  const fileOutputNext = fileOutputHint
+    ? "fileOutput 기본값 true 유지"
+    : "read-only/plan 모드이므로 send/turn에는 fileOutput:false 지정";
   const next = bootstrapEcho
-    ? "pmux_agent_wait_ready에 bootId와 expectEcho:true를 전달해 echo 완료를 확인한 뒤 turn=1부터 작업 전송 (bootstrap이 turn 0을 소비하므로 사용자 턴은 1부터, turn 1에는 expectPrevTurnEnd를 주지 말 것)"
-    : "pmux_agent_wait_ready(bootId 전달 권장, expectEcho:false) 후 turn=1부터 pmux_agent_send 또는 pmux_agent_turn";
+    ? `pmux_agent_wait_ready에 bootId와 expectEcho:true를 전달해 echo 완료를 확인한 뒤 turn=1부터 작업 전송 (${fileOutputNext}; bootstrap이 turn 0을 소비하므로 사용자 턴은 1부터, turn 1에는 expectPrevTurnEnd를 주지 말 것)`
+    : `pmux_agent_wait_ready(bootId 전달 권장, expectEcho:false) 후 turn=1부터 pmux_agent_send 또는 pmux_agent_turn (${fileOutputNext})`;
   const bootFields = {
     bootId,
     bootFile,

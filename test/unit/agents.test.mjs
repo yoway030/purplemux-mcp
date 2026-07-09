@@ -53,14 +53,14 @@ check("compileAllPatterns: invalid user pattern throws", () => {
 
 // ---- recommendedFileOutput ------------------------------------------------
 
-check("recommendedFileOutput: codex sandbox routing (default read-only → false)", () => {
-  assertEqual(recommendedFileOutput({ provider: "codex" }), false);
+check("recommendedFileOutput: codex sandbox routing (default workspace-write → true)", () => {
+  assertEqual(recommendedFileOutput({ provider: "codex" }), true);
   assertEqual(recommendedFileOutput({ provider: "codex", sandbox: "read-only" }), false);
   assertEqual(recommendedFileOutput({ provider: "codex", sandbox: "workspace-write" }), true);
 });
 
-check("recommendedFileOutput: claude permissionMode routing (default plan → false)", () => {
-  assertEqual(recommendedFileOutput({ provider: "claude" }), false);
+check("recommendedFileOutput: claude permissionMode routing (default acceptEdits → true)", () => {
+  assertEqual(recommendedFileOutput({ provider: "claude" }), true);
   assertEqual(recommendedFileOutput({ provider: "claude", permissionMode: "plan" }), false);
   assertEqual(recommendedFileOutput({ provider: "claude", permissionMode: "acceptEdits" }), true);
 });

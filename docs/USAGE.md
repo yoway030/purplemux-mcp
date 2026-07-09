@@ -148,8 +148,8 @@ node test/e2e.mjs     # 라이브 라운드트립 12케이스 (스크래치 탭 
 ### 권장 워크플로
 
 1. `pmux_list_workspaces` — workspaceId 확인
-2. **model/effort 기본값 확인** — 생략 시 표준 기본값이 적용된다: codex=`gpt-5.5`+`medium`, claude=`claude-sonnet-5`+`high` (2026-07-08 사용자 지정). 기본값과 다른 구성이 필요할 때만 사용자에게 확인. sandbox/permissionMode는 작업 성격에 맞게 선택
-3. `pmux_agent_start` — 탭 생성 + CLI 런치 + 부트 배선. 응답의 **`bootId`**, **`hooksWired`**(훅 주입 성공 여부), **`recommendedFileOutput`**(read-only/plan 에이전트는 `false`)을 확인
+2. **기본값 확인** — 생략 시 표준 기본값이 적용된다: codex=`gpt-5.5`+`medium`+`workspace-write`, claude=`claude-sonnet-5`+`high`+`acceptEdits`. 이 기본값은 `fileOutput:true` 응답 파일 경로를 바로 쓸 수 있게 잡혀 있다. 더 엄격한 구성이 필요할 때만 codex `read-only` 또는 claude `plan`을 명시한다.
+3. `pmux_agent_start` — 탭 생성 + CLI 런치 + 부트 배선. 응답의 **`bootId`**, **`hooksWired`**(훅 주입 성공 여부), **`recommendedFileOutput`**(기본값은 `true`; read-only/plan 에이전트는 `false`)을 확인
 4. `pmux_agent_wait_ready` — `bootId`를 전달한다. codex 기본 경로(`bootstrapEcho:true`)에서는 `{expectEcho:true}`를 함께 전달해 bootstrap echo의 DONE 마커(완료 증거)를 기다린다. claude 기본 경로(`bootstrapEcho:false`)에서는 `expectEcho`를 생략하고 cliState/pane readiness와 부트 파일 진단을 사용한다.
 5. `pmux_agent_turn` — **turn=1부터** (`turn 1`에는 `expectPrevTurnEnd` 금지). `agentId`는 호출자가 직접 정한다(짧은 id를 만들어 이 탭의 모든 턴에 재사용; `boot`는 bootstrap echo 사용 시 예약어라 피한다). send+폴링+회수 한 번에 — **대부분 이것만으로 충분**. 직접 폴링하려면 `pmux_agent_send`+`pmux_agent_capture`
 6. 작업이 끝나면 **반드시** `pmux_close_tab`으로 정리

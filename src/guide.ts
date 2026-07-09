@@ -20,10 +20,10 @@ TOOL LAYERS — pick the right one:
 
 Golden path for a subagent:
 1. pmux_list_workspaces → workspaceId
-2. Model/effort defaults are preconfigured (codex=gpt-5.5+medium, claude=claude-sonnet-5+high) — launch with them; ask the user only when a different configuration seems needed (codex sandbox / claude permissionMode follow the task)
+2. Defaults are preconfigured (codex=gpt-5.5+medium+workspace-write, claude=claude-sonnet-5+high+acceptEdits) so the normal fileOutput:true path can write report files; ask the user only when a stricter or different configuration seems needed
 3. pmux_agent_start → returns tabId, bootId, recommendedFileOutput
 4. pmux_agent_wait_ready with bootId. For codex's default bootstrapEcho:true, pass expectEcho:true; for claude's default bootstrapEcho:false, leave expectEcho false.
-5. pmux_agent_turn from turn=1 (do not pass expectPrevTurnEnd on turn 1). agentId is caller-chosen: pick a short id (e.g. "worker1"; avoid "boot" because it is reserved when bootstrapEcho is enabled) and reuse it for every turn of this tab. If recommendedFileOutput was false, pass fileOutput:false.
+5. pmux_agent_turn from turn=1 (do not pass expectPrevTurnEnd on turn 1). agentId is caller-chosen: pick a short id (e.g. "worker1"; avoid "boot" because it is reserved when bootstrapEcho is enabled) and reuse it for every turn of this tab. Keep the default fileOutput:true unless recommendedFileOutput was false; then pass fileOutput:false.
 6. pmux_close_tab when the task is finished
 
 For failure modes, recovery patterns, and full semantics call pmux_guide. For the purplemux HTTP API reference call pmux_api_guide. Browser tools need Electron (503 when headless); web-browser tabs always report alive:false — that is normal, not a dead tab.`;
@@ -55,12 +55,13 @@ full protocol control.
 ## 2. Golden path (one subagent, N turns)
 
 1. \`pmux_list_workspaces\` → pick \`workspaceId\`.
-2. Model/effort **defaults are preconfigured** (standing user config):
-   codex = \`gpt-5.5\` + \`medium\`, claude = \`claude-sonnet-5\` + \`high\` —
-   omitted values resolve to these, so launching without asking is the
-   normal path. Ask the user only when a different configuration seems
-   needed. Choose codex \`sandbox\` / claude \`permissionMode\` by task
-   (read-only/plan for review-only; write modes when files must change).
+2. Defaults are preconfigured (standing user config):
+   codex = \`gpt-5.5\` + \`medium\` + \`workspace-write\`, claude =
+   \`claude-sonnet-5\` + \`high\` + \`acceptEdits\`. Omitted values resolve
+   to these so the normal \`fileOutput:true\` path can write report files.
+   Launch without asking unless a stricter or different configuration is
+   needed. For review-only work, explicitly choose codex \`read-only\` or
+   claude \`plan\` and then use \`fileOutput:false\`.
 3. \`pmux_agent_start {workspaceId, provider, model?, effort?, sandbox?/permissionMode?}\`
    → returns \`tabId\`, \`bootId\`, \`hooksWired\`, \`recommendedFileOutput\`,
    \`bootstrapEcho\`. Non-blocking: the CLI is still booting.
@@ -80,8 +81,9 @@ full protocol control.
      \`pmux_agent_turn\` is already safe to call right after a previous turn;
      pass \`expectPrevTurnEnd\` + \`expectPrevRequestId\` only when you want the
      send to hard-fail unless the previous turn's completion marker is visible.
-   - If \`recommendedFileOutput\` was \`false\` (codex read-only / claude plan
-     mode: the agent cannot write files), pass \`fileOutput:false\`.
+   - Keep \`fileOutput:true\` by default. If \`recommendedFileOutput\` was
+     \`false\` (codex read-only / claude plan mode: the agent cannot write
+     files), pass \`fileOutput:false\`.
    - \`pmux_agent_turn\` = send → poll → recover in one call; for manual pacing
      use \`pmux_agent_send\` + \`pmux_agent_capture\`.
 6. \`pmux_close_tab\` when the task is finished. Never leak tabs.

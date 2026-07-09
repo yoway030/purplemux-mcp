@@ -27,7 +27,7 @@ check("buildAgentCommand: codex defaults — standing model/effort applied (2026
   const { command } = buildAgentCommand({ provider: "codex" });
   assertEqual(
     command,
-    "codex --no-alt-screen -s read-only -m gpt-5.5 -c model_reasoning_effort=medium",
+    "codex --no-alt-screen -s workspace-write -m gpt-5.5 -c model_reasoning_effort=medium",
   );
 });
 
@@ -50,7 +50,7 @@ check("buildAgentCommand: claude effort → --effort flag (claude >=2.1.202, 실
   });
   assertEqual(
     command,
-    "claude --model claude-sonnet-5 --permission-mode plan --effort xhigh",
+    "claude --model claude-sonnet-5 --permission-mode acceptEdits --effort xhigh",
   );
 });
 
@@ -58,7 +58,7 @@ check("buildAgentCommand: claude defaults — standing model/effort applied (202
   const { command } = buildAgentCommand({ provider: "claude" });
   assertEqual(
     command,
-    "claude --model claude-sonnet-5 --permission-mode plan --effort high",
+    "claude --model claude-sonnet-5 --permission-mode acceptEdits --effort high",
   );
 });
 

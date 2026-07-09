@@ -32,6 +32,8 @@ export const DEFAULT_EFFORT: Record<Provider, Effort> = {
   codex: "medium",
   claude: "high",
 };
+export const DEFAULT_SANDBOX: Sandbox = "workspace-write";
+export const DEFAULT_PERMISSION_MODE: PermissionMode = "acceptEdits";
 
 const EFFORT_VALUES: readonly Effort[] = ["low", "medium", "high", "xhigh"];
 const SANDBOX_VALUES: readonly Sandbox[] = ["read-only", "workspace-write"];
@@ -82,7 +84,7 @@ export function buildAgentCommand(
         `Invalid sandbox "${sandbox}": must be one of ${SANDBOX_VALUES.join("|")}.`,
       );
     }
-    const parts = ["codex", "--no-alt-screen", "-s", sandbox ?? "read-only"];
+    const parts = ["codex", "--no-alt-screen", "-s", sandbox ?? DEFAULT_SANDBOX];
     parts.push("-m", model);
     parts.push("-c", `model_reasoning_effort=${effort}`);
     return { command: parts.join(" ") };
@@ -99,7 +101,7 @@ export function buildAgentCommand(
   }
   const parts = ["claude"];
   parts.push("--model", model);
-  parts.push("--permission-mode", permissionMode ?? "plan");
+  parts.push("--permission-mode", permissionMode ?? DEFAULT_PERMISSION_MODE);
   // claude >=2.1.202 has a real --effort flag (low|medium|high|xhigh|max, 실측
   // 2026-07-08) — pass it through instead of the old bootstrapHint workaround.
   // Our enum is the CLI's subset minus "max", so every accepted value is valid.

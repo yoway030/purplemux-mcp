@@ -203,10 +203,10 @@ export const agentStartShape = {
     .describe("Optional reasoning effort. codex: -c model_reasoning_effort=<v>; claude: --effort <v> (claude >=2.1.202). Defaults: codex=medium, claude=high."),
   sandbox: sandboxEnum
     .optional()
-    .describe("Codex-only sandbox. Defaults to read-only in the command profile."),
+    .describe("Codex-only sandbox. Defaults to workspace-write so fileOutput:true can write report files; pass read-only for review-only work."),
   permissionMode: permissionModeEnum
     .optional()
-    .describe("Claude-only permission mode; bypassPermissions is intentionally excluded."),
+    .describe("Claude-only permission mode. Defaults to acceptEdits so fileOutput:true can write report files; pass plan for review-only work. bypassPermissions is intentionally excluded."),
   shellTimeoutMs: z
     .number()
     .int()
